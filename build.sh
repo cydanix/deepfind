@@ -56,6 +56,32 @@ cp "DeepFind.icns" "$BUNDLE_PATH/Contents/Resources/DeepFind.icns"
 echo "Embedding mlx-swift bundle…"
 cp -R "$BUILD_DIR/Build/Products/Release/mlx-swift_Cmlx.bundle" "$BUNDLE_PATH/Contents/Resources/mlx-swift_Cmlx.bundle"
 
+echo "Copying Meilisearch binary into bundle…"
+if [ -f "External/meilisearch" ]; then
+    cp "External/meilisearch" "$BUNDLE_PATH/Contents/Resources/meilisearch"
+    chmod +x "$BUNDLE_PATH/Contents/Resources/meilisearch"
+    
+    echo "Signing Meilisearch binary…"
+    xcrun codesign --force \
+                   --options runtime \
+                   --timestamp \
+                   --sign "$SIGNING_IDENTITY" \
+                   --verbose=4 \
+                   "$BUNDLE_PATH/Contents/Resources/meilisearch"
+    
+    echo "Verifying Meilisearch binary signature…"
+    xcrun codesign --verify --verbose=4 "$BUNDLE_PATH/Contents/Resources/meilisearch"
+else
+    error_exit "Meilisearch binary not found at External/meilisearch. Run get_meilisearch_binary.sh first."
+fi
+
+echo "Copying third-party licenses into bundle…"
+if [ -f "THIRD-PARTY-LICENSES" ]; then
+    cp "THIRD-PARTY-LICENSES" "$BUNDLE_PATH/Contents/Resources/THIRD-PARTY-LICENSES"
+else
+    error_exit "THIRD-PARTY-LICENSES file not found. This file is required for legal compliance."
+fi
+
 echo "Writing Info.plist…"
 cat > "$BUNDLE_PATH/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>

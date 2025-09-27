@@ -10,3 +10,6 @@ build
 release
 *.profraw
 
+Temp/meilisearch_data/
+External/meilisearch
+

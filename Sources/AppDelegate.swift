@@ -8,11 +8,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupSignalHandlers()
         setupStatusBarItem()
+        
+        // Start Meilisearch server
+        Task {
+            let success = await MeilisearchManager.shared.start()
+            if success {
+                Logger.log("Meilisearch server started successfully", log: Logger.general)
+            } else {
+                Logger.log("Failed to start Meilisearch server", log: Logger.general)
+            }
+        }
+        
         Logger.log("Application did finish launching", log: Logger.general)
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         Logger.log("Application will terminate", log: Logger.general)
+        
+        // Stop Meilisearch server synchronously to ensure it completes before app exits
+        MeilisearchManager.shared.stopSyncForTermination()
+        Logger.log("Meilisearch server stopped", log: Logger.general)
     }
 
     private func setupStatusBarItem() {
@@ -39,6 +54,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let sigintSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         sigintSource.setEventHandler {
             Logger.log("Received SIGINT (Ctrl+C)", log: Logger.general)
+            MeilisearchManager.shared.stopSyncForTermination()
             NSApplication.shared.terminate(nil)
         }
         sigintSource.resume()
@@ -48,6 +64,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let sigtermSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         sigtermSource.setEventHandler {
             Logger.log("Received SIGTERM", log: Logger.general)
+            MeilisearchManager.shared.stopSyncForTermination()
             NSApplication.shared.terminate(nil)
         }
         sigtermSource.resume()

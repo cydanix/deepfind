@@ -82,15 +82,29 @@ struct DeepFind: App {
                     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
                     let alert = NSAlert()
                     alert.messageText = "\(DeepFindAppName) \(version)"
-                    alert.informativeText = "© 2025 \(DeepFindCompanyName)"
+                    alert.informativeText = "© 2025 \(DeepFindCompanyName)\n\nThis application bundles Meilisearch (MIT License) and other open-source components. See THIRD-PARTY-LICENSES file for details."
                     alert.alertStyle = .informational
                     alert.icon = NSApp.applicationIconImage
                     alert.addButton(withTitle: "OK")
                     alert.addButton(withTitle: "Visit Website")
+                    alert.addButton(withTitle: "View Licenses")
                     let response = alert.runModal()
                     if response == .alertSecondButtonReturn {
                         if let url = URL(string: DeepFindSite) {
                             NSWorkspace.shared.open(url)
+                        }
+                    } else if response == .alertThirdButtonReturn {
+                        // Open the THIRD-PARTY-LICENSES file
+                        if let bundlePath = Bundle.main.resourcePath,
+                           let licensesURL = Bundle.main.url(forResource: "THIRD-PARTY-LICENSES", withExtension: nil) {
+                            NSWorkspace.shared.open(licensesURL)
+                        } else {
+                            // Fallback: try to find it in the app's directory structure
+                            let alert = NSAlert()
+                            alert.messageText = "Third-Party Licenses"
+                            alert.informativeText = "License information can be found in the THIRD-PARTY-LICENSES file included with this application."
+                            alert.alertStyle = .informational
+                            alert.runModal()
                         }
                     }
                 }
