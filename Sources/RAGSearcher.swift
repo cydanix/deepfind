@@ -105,6 +105,12 @@ class RAGSearcher: ObservableObject {
     private func findRelevantChunks(for query: String, indexName: String) async throws -> [MeilisearchDocumentChunk] {
         Logger.log("Searching Meilisearch index '\(indexName)' for query: \(query)", log: Logger.general)
         
+        // Check Meilisearch server health first
+        let isHealthy = await meilisearchManager.healthCheck()
+        if !isHealthy {
+            throw SearchError.searchFailed("Meilisearch server is not healthy")
+        }
+        
         // Configure search options
         let searchOptions = SearchOptions(
             limit: 10, // Get top 10 most relevant chunks
@@ -139,8 +145,24 @@ class RAGSearcher: ObservableObject {
     /// - Parameter data: Raw JSON data from Meilisearch
     /// - Returns: Array of parsed document chunks
     private func parseSearchResults(from data: Data) throws -> [MeilisearchDocumentChunk] {
+        // Separate struct for search results that matches what Meilisearch actually returns
+        struct SearchResultChunk: Codable {
+            let id: String
+            let content: String
+            let fileName: String
+            let filePath: String
+            let pageNumber: Int?
+            let chunkNumber: Int
+            let wordCount: Int
+            // Note: _formatted is ignored as we don't need it
+            
+            private enum CodingKeys: String, CodingKey {
+                case id, content, fileName, filePath, pageNumber, chunkNumber, wordCount
+            }
+        }
+        
         struct MeilisearchSearchResponse: Codable {
-            let hits: [MeilisearchDocumentChunk]
+            let hits: [SearchResultChunk]
             let query: String
             let processingTimeMs: Int
             let limit: Int
@@ -148,9 +170,45 @@ class RAGSearcher: ObservableObject {
             let estimatedTotalHits: Int
         }
         
+        // Log the raw response for debugging (truncated)
+        if let responseString = String(data: data, encoding: .utf8) {
+            let truncated = responseString.count > 500 ? String(responseString.prefix(500)) + "..." : responseString
+            Logger.log("Meilisearch raw response: \(truncated)", log: Logger.general)
+        } else {
+            Logger.log("Failed to convert Meilisearch response to string, data size: \(data.count) bytes", log: Logger.general)
+        }
+        
+        // Check if data is empty
+        guard !data.isEmpty else {
+            throw SearchError.searchFailed("Empty response from Meilisearch")
+        }
+        
         let decoder = JSONDecoder()
-        let response = try decoder.decode(MeilisearchSearchResponse.self, from: data)
-        return response.hits
+        do {
+            let response = try decoder.decode(MeilisearchSearchResponse.self, from: data)
+            Logger.log("Successfully parsed Meilisearch response with \(response.hits.count) hits", log: Logger.general)
+            
+            // Convert search results to MeilisearchDocumentChunk format
+            let documentChunks = response.hits.map { hit in
+                MeilisearchDocumentChunk(
+                    id: hit.id,
+                    content: hit.content,
+                    fileName: hit.fileName,
+                    filePath: hit.filePath,
+                    folderPath: "", // Not returned in search, but required for the struct
+                    pageNumber: hit.pageNumber,
+                    chunkNumber: hit.chunkNumber,
+                    chunkSize: hit.content.count, // Approximate based on content length
+                    wordCount: hit.wordCount,
+                    fileType: "pdf"
+                )
+            }
+            
+            return documentChunks
+        } catch {
+            Logger.log("Failed to decode Meilisearch response: \(error.localizedDescription)", log: Logger.general)
+            throw SearchError.searchFailed("Failed to parse Meilisearch response: \(error.localizedDescription)")
+        }
     }
     
     /// Build context string from relevant document chunks

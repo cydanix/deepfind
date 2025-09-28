@@ -19,7 +19,7 @@ class FolderIndexer: ObservableObject {
     
     // Chunking parameters
     private let chunkSize = 1000 // characters
-    private let overlapSize = 200 // characters
+    private let overlapSize = 256 // characters (increased as requested)
     private let batchSize = 50 // Balanced batch size to avoid server overload
     private let maxRetries = 3 // Maximum retry attempts for failed batches
     
@@ -88,6 +88,15 @@ class FolderIndexer: ObservableObject {
                 
                 // Create chunks from PDF pages
                 let chunks = createChunksFromPdf(document: document, folderPath: folderPath)
+                
+                // Debug logging for chunking analysis
+                let avgChunksPerPage = chunks.count / max(document.totalPages, 1)
+                Logger.log("Created \(chunks.count) chunks from \(document.fileName) (\(document.totalPages) pages) - Avg: \(avgChunksPerPage) chunks/page", log: Logger.general)
+                
+                if chunks.count > 0 {
+                    let sampleChunk = chunks[0]
+                    Logger.log("Sample chunk size: \(sampleChunk.content.count) chars, \(sampleChunk.wordCount) words", log: Logger.general)
+                }
                 
                 // Index chunks in smaller batches with retry logic and better pacing
                 Logger.log("Indexing \(chunks.count) chunks from \(document.fileName) in batches of \(batchSize)", log: Logger.general)
@@ -340,11 +349,17 @@ class FolderIndexer: ObservableObject {
     ) -> [MeilisearchDocumentChunk] {
         guard !text.isEmpty else { return [] }
         
+        // Debug logging for excessive chunking
+        if text.count < chunkSize && text.count > 0 {
+            Logger.log("Page \(pageNumber) has only \(text.count) chars (less than chunk size \(chunkSize))", log: Logger.general)
+        }
+        
         var chunks: [MeilisearchDocumentChunk] = []
         var startIndex = text.startIndex
         var chunkNumber = 1
+        let maxChunksPerPage = 20 // Safety limit to prevent runaway chunking
         
-        while startIndex < text.endIndex {
+        while startIndex < text.endIndex && chunks.count < maxChunksPerPage {
             let remainingText = String(text[startIndex...])
             let currentChunkSize = min(chunkSize, remainingText.count)
             let endIndex = text.index(startIndex, offsetBy: currentChunkSize, limitedBy: text.endIndex) ?? text.endIndex
@@ -352,8 +367,8 @@ class FolderIndexer: ObservableObject {
             let chunkText = String(text[startIndex..<endIndex])
             let wordCount = PdfParser.countWords(in: chunkText)
             
-            // Only create chunks with meaningful content
-            if wordCount > 10 {
+            // Only create chunks with meaningful content (increased threshold)
+            if wordCount > 50 {
                 // Create safe document ID by sanitizing filename and using full UUID
                 let safeFileName = sanitizeFileName(fileName)
                 let chunkId = "\(safeFileName)_p\(pageNumber)_c\(chunkNumber)_\(UUID().uuidString)"
@@ -391,6 +406,13 @@ class FolderIndexer: ObservableObject {
             let nextStartOffset = max(currentChunkSize - overlapSize, 1)
             startIndex = text.index(startIndex, offsetBy: nextStartOffset, limitedBy: text.endIndex) ?? text.endIndex
             chunkNumber += 1
+        }
+        
+        // Debug excessive chunking per page
+        if chunks.count >= maxChunksPerPage {
+            Logger.log("WARNING: Page \(pageNumber) hit safety limit of \(maxChunksPerPage) chunks from \(text.count) chars - chunking stopped early!", log: Logger.general)
+        } else if chunks.count > 10 {
+            Logger.log("WARNING: Page \(pageNumber) created \(chunks.count) chunks from \(text.count) chars - this seems excessive!", log: Logger.general)
         }
         
         return chunks

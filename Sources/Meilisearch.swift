@@ -63,8 +63,9 @@ class MeilisearchManager {
         config.timeoutIntervalForResource = 120 // 2 minutes for complete operations
         self.urlSession = URLSession(configuration: config)
         
-        // Generate a random master key
-        self.masterKey = generateMasterKey()
+        // Use a fixed master key for consistency across sessions
+        // In production, this should be more secure, but for development/testing, a fixed key is easier
+        self.masterKey = "deepfind_master_key_for_local_development_only_12345"
         
         Logger.log("MeilisearchManager initialized - Mode: \(isLocalRun ? "Local Development" : "Production App"), Binary: \(binaryPath), Data: \(dataPath)", log: Logger.general)
     }
@@ -525,40 +526,26 @@ class MeilisearchManager {
         ]
         
         Logger.log("Starting Meilisearch with arguments: \(process.arguments!.joined(separator: " "))", log: Logger.general)
+        Logger.log("Using master key: \(masterKey)", log: Logger.general)
         
-        // For debugging: capture output instead of redirecting to null
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
+        // Redirect output to log files to prevent pipe hanging
+        let logDir = "/tmp" // Use /tmp instead of /var/log for better permissions
+        let stdoutLogPath = "\(logDir)/meilisearch_stdout.log"
+        let stderrLogPath = "\(logDir)/meilisearch_stderr.log"
+        
+        // Create log files if they don't exist
+        FileManager.default.createFile(atPath: stdoutLogPath, contents: nil, attributes: nil)
+        FileManager.default.createFile(atPath: stderrLogPath, contents: nil, attributes: nil)
+        
+        process.standardOutput = FileHandle(forWritingAtPath: stdoutLogPath)
+        process.standardError = FileHandle(forWritingAtPath: stderrLogPath)
+        
+        Logger.log("Meilisearch output will be logged to \(stdoutLogPath) and \(stderrLogPath)", log: Logger.general)
         
         try process.run()
         
         self.process = process
         Logger.log("Meilisearch process started with PID: \(process.processIdentifier)", log: Logger.general)
-        
-        // Monitor process output asynchronously
-        DispatchQueue.global().async {
-            // Give the process a moment to start
-            Thread.sleep(forTimeInterval: 0.1)
-            
-            let outputData = outputPipe.fileHandleForReading.availableData
-            if !outputData.isEmpty {
-                let output = String(data: outputData, encoding: .utf8) ?? "Unable to decode output"
-                Logger.log("Meilisearch stdout: \(output)", log: Logger.general)
-            }
-            
-            let errorData = errorPipe.fileHandleForReading.availableData  
-            if !errorData.isEmpty {
-                let error = String(data: errorData, encoding: .utf8) ?? "Unable to decode error"
-                Logger.log("Meilisearch stderr: \(error)", log: Logger.general)
-            }
-            
-            // Check if process is still running
-            if let process = self.process, !process.isRunning {
-                Logger.log("Meilisearch process terminated unexpectedly with exit code: \(process.terminationStatus)", log: Logger.general)
-            }
-        }
         
         return true
     }
@@ -646,7 +633,7 @@ class MeilisearchManager {
         }
         
         let startTime = CFAbsoluteTimeGetCurrent()
-        Logger.log("Starting \(method) request to \(path) (body size: \(body?.count ?? 0) bytes)", log: Logger.general)
+        Logger.log("Starting \(method) request to \(path) (body size: \(body?.count ?? 0) bytes) with master key: \(masterKey.prefix(8))...", log: Logger.general)
         
         do {
             let (data, response) = try await urlSession.data(for: request)
@@ -661,6 +648,12 @@ class MeilisearchManager {
                 let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
                 let duration = CFAbsoluteTimeGetCurrent() - startTime
                 Logger.log("HTTP error \(httpResponse.statusCode) for \(method) request to \(path) after \(String(format: "%.2f", duration))s: \(errorMessage)", log: Logger.general)
+                
+                // For authentication errors, provide more specific message
+                if httpResponse.statusCode == 403 {
+                    Logger.log("Authentication failed - master key mismatch. Server key might be different from client key.", log: Logger.general)
+                }
+                
                 throw MeilisearchError.httpError(httpResponse.statusCode, errorMessage)
             }
             
