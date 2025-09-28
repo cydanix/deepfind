@@ -26,9 +26,9 @@ final class MeilisearchTests: XCTestCase {
     
     private func deleteTestIndexIfExists(_ indexUid: String) async throws {
         do {
-            _ = try await meilisearchManager.deleteIndex(uid: indexUid)
-            // Wait a bit for deletion to complete
-            try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+            let deleteData = try await meilisearchManager.deleteIndex(uid: indexUid)
+            // Properly wait for deletion task to complete
+            _ = try await waitForTask(taskData: deleteData)
         } catch {
             // Ignore errors if index doesn't exist
         }
@@ -68,7 +68,7 @@ final class MeilisearchTests: XCTestCase {
     // MARK: - Individual Tests
     
     func testCreateIndex() async throws {
-        let testIndexUid = "test_index_\(UUID().uuidString.prefix(8))"
+        let testIndexUid = "test_index_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString.prefix(8))"
         
         // Clean up any existing test index
         try await deleteTestIndexIfExists(testIndexUid)
@@ -91,7 +91,7 @@ final class MeilisearchTests: XCTestCase {
     }
     
     func testAddDocuments() async throws {
-        let testIndexUid = "test_index_\(UUID().uuidString.prefix(8))"
+        let testIndexUid = "test_index_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString.prefix(8))"
         
         // Clean up and create test index
         try await deleteTestIndexIfExists(testIndexUid)
@@ -131,7 +131,7 @@ final class MeilisearchTests: XCTestCase {
     }
     
     func testSearchDocuments() async throws {
-        let testIndexUid = "test_index_\(UUID().uuidString.prefix(8))"
+        let testIndexUid = "test_index_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString.prefix(8))"
         
         // Clean up, create index, and add documents
         try await deleteTestIndexIfExists(testIndexUid)
@@ -191,7 +191,7 @@ final class MeilisearchTests: XCTestCase {
     }
     
     func testDeleteIndex() async throws {
-        let testIndexUid = "test_index_\(UUID().uuidString.prefix(8))"
+        let testIndexUid = "test_index_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString.prefix(8))"
         
         // Create test index
         try await deleteTestIndexIfExists(testIndexUid)
@@ -220,7 +220,7 @@ final class MeilisearchTests: XCTestCase {
     // MARK: - Integration Test
     
     func testCompleteWorkflow() async throws {
-        let testIndexUid = "test_index_\(UUID().uuidString.prefix(8))"
+        let testIndexUid = "test_index_\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString.prefix(8))"
         
         // 1. Create index
         try await deleteTestIndexIfExists(testIndexUid)
