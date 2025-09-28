@@ -78,7 +78,7 @@ struct ContentView: View {
     // Knowledge base controls - always visible
     private var knowledgeBaseView: some View {
         VStack(spacing: 16) {
-            if let folderPath = folderIndexer.indexedFolderPath {
+            if folderIndexer.indexedFolderPath != nil {
                 // When folder is selected - compact view
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
@@ -113,8 +113,10 @@ struct ContentView: View {
                         .disabled(folderIndexer.isIndexing)
                         
                         Button {
-                            folderIndexer.clearIndex()
-                            clearResults()
+                            Task {
+                                await folderIndexer.clearIndex()
+                                clearResults()
+                            }
                         } label: {
                             Image(systemName: "trash")
                         }

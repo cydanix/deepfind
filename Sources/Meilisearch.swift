@@ -57,10 +57,10 @@ class MeilisearchManager {
             self.dataPath = appDataURL.appendingPathComponent("meilisearch_data").path
         }
         
-        // Configure URL session with timeout
+        // Configure URL session with reasonable timeout to prevent hangs
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
+        config.timeoutIntervalForRequest = 30   // 30 seconds for individual requests
+        config.timeoutIntervalForResource = 120 // 2 minutes for complete operations
         self.urlSession = URLSession(configuration: config)
         
         // Generate a random master key
@@ -286,6 +286,188 @@ class MeilisearchManager {
         }
     }
     
+    // MARK: - Index Management
+    
+    /// Create a new index
+    /// - Parameters:
+    ///   - uid: Unique identifier for the index
+    ///   - primaryKey: Optional primary key field name
+    /// - Returns: Index creation task response data
+    func createIndex(uid: String, primaryKey: String? = nil) async throws -> Data {
+        var body: [String: Any] = ["uid": uid]
+        if let primaryKey = primaryKey {
+            body["primaryKey"] = primaryKey
+        }
+        
+        let jsonData = try JSONSerialization.data(withJSONObject: body)
+        return try await post("/indexes", body: jsonData)
+    }
+    
+    /// Delete an index
+    /// - Parameter uid: Unique identifier of the index to delete
+    /// - Returns: Index deletion task response data
+    func deleteIndex(uid: String) async throws -> Data {
+        return try await delete("/indexes/\(uid)")
+    }
+    
+    /// Get all indexes
+    /// - Returns: List of all indexes
+    func getIndexes() async throws -> Data {
+        return try await get("/indexes")
+    }
+    
+    /// Get a specific index
+    /// - Parameter uid: Unique identifier of the index
+    /// - Returns: Index information
+    func getIndex(uid: String) async throws -> Data {
+        return try await get("/indexes/\(uid)")
+    }
+    
+    // MARK: - Document Management
+    
+    /// Add or update documents in an index
+    /// - Parameters:
+    ///   - indexUid: Unique identifier of the index
+    ///   - documents: Array of documents to add/update
+    ///   - primaryKey: Optional primary key for the documents
+    /// - Returns: Document indexing task response data
+    func indexDocuments<T: Encodable>(indexUid: String, documents: [T], primaryKey: String? = nil) async throws -> Data {
+        var urlPath = "/indexes/\(indexUid)/documents"
+        if let primaryKey = primaryKey {
+            urlPath += "?primaryKey=\(primaryKey)"
+        }
+        
+        let jsonData = try JSONEncoder().encode(documents)
+        return try await post(urlPath, body: jsonData)
+    }
+    
+    /// Add or update a single document in an index
+    /// - Parameters:
+    ///   - indexUid: Unique identifier of the index
+    ///   - document: Document to add/update
+    ///   - primaryKey: Optional primary key for the document
+    /// - Returns: Document indexing task response data
+    func indexDocument<T: Encodable>(indexUid: String, document: T, primaryKey: String? = nil) async throws -> Data {
+        return try await indexDocuments(indexUid: indexUid, documents: [document], primaryKey: primaryKey)
+    }
+    
+    /// Get all documents from an index
+    /// - Parameters:
+    ///   - indexUid: Unique identifier of the index
+    ///   - limit: Maximum number of documents to return (default: 20)
+    ///   - offset: Number of documents to skip (default: 0)
+    /// - Returns: Documents data
+    func getDocuments(indexUid: String, limit: Int = 20, offset: Int = 0) async throws -> Data {
+        return try await get("/indexes/\(indexUid)/documents?limit=\(limit)&offset=\(offset)")
+    }
+    
+    /// Get a specific document by ID
+    /// - Parameters:
+    ///   - indexUid: Unique identifier of the index
+    ///   - documentId: ID of the document to retrieve
+    /// - Returns: Document data
+    func getDocument(indexUid: String, documentId: String) async throws -> Data {
+        return try await get("/indexes/\(indexUid)/documents/\(documentId)")
+    }
+    
+    /// Delete a specific document by ID
+    /// - Parameters:
+    ///   - indexUid: Unique identifier of the index
+    ///   - documentId: ID of the document to delete
+    /// - Returns: Document deletion task response data
+    func deleteDocument(indexUid: String, documentId: String) async throws -> Data {
+        return try await delete("/indexes/\(indexUid)/documents/\(documentId)")
+    }
+    
+    /// Delete multiple documents by IDs
+    /// - Parameters:
+    ///   - indexUid: Unique identifier of the index
+    ///   - documentIds: Array of document IDs to delete
+    /// - Returns: Document deletion task response data
+    func deleteDocuments(indexUid: String, documentIds: [String]) async throws -> Data {
+        let jsonData = try JSONEncoder().encode(documentIds)
+        return try await post("/indexes/\(indexUid)/documents/delete-batch", body: jsonData)
+    }
+    
+    /// Delete all documents from an index
+    /// - Parameter indexUid: Unique identifier of the index
+    /// - Returns: Document deletion task response data
+    func deleteAllDocuments(indexUid: String) async throws -> Data {
+        return try await delete("/indexes/\(indexUid)/documents")
+    }
+    
+    // MARK: - Search Operations
+    
+    /// Search for documents in an index
+    /// - Parameters:
+    ///   - indexUid: Unique identifier of the index
+    ///   - query: Search query string
+    ///   - options: Additional search options
+    /// - Returns: Search results data
+    func search(indexUid: String, query: String, options: SearchOptions? = nil) async throws -> Data {
+        var searchBody: [String: Any] = ["q": query]
+        
+        if let options = options {
+            if let limit = options.limit {
+                searchBody["limit"] = limit
+            }
+            if let offset = options.offset {
+                searchBody["offset"] = offset
+            }
+            if let attributesToRetrieve = options.attributesToRetrieve {
+                searchBody["attributesToRetrieve"] = attributesToRetrieve
+            }
+            if let attributesToCrop = options.attributesToCrop {
+                searchBody["attributesToCrop"] = attributesToCrop
+            }
+            if let cropLength = options.cropLength {
+                searchBody["cropLength"] = cropLength
+            }
+            if let attributesToHighlight = options.attributesToHighlight {
+                searchBody["attributesToHighlight"] = attributesToHighlight
+            }
+            if let filter = options.filter {
+                searchBody["filter"] = filter
+            }
+            if let sort = options.sort {
+                searchBody["sort"] = sort
+            }
+            if let facets = options.facets {
+                searchBody["facets"] = facets
+            }
+            if let highlightPreTag = options.highlightPreTag {
+                searchBody["highlightPreTag"] = highlightPreTag
+            }
+            if let highlightPostTag = options.highlightPostTag {
+                searchBody["highlightPostTag"] = highlightPostTag
+            }
+            if let cropMarker = options.cropMarker {
+                searchBody["cropMarker"] = cropMarker
+            }
+            if let showMatchesPosition = options.showMatchesPosition {
+                searchBody["showMatchesPosition"] = showMatchesPosition
+            }
+        }
+        
+        let jsonData = try JSONSerialization.data(withJSONObject: searchBody)
+        return try await post("/indexes/\(indexUid)/search", body: jsonData)
+    }
+    
+    // MARK: - Task Management
+    
+    /// Get information about a specific task
+    /// - Parameter taskId: ID of the task
+    /// - Returns: Task information
+    func getTask(taskId: Int) async throws -> Data {
+        return try await get("/tasks/\(taskId)")
+    }
+    
+    /// Get all tasks
+    /// - Returns: List of all tasks
+    func getTasks() async throws -> Data {
+        return try await get("/tasks")
+    }
+    
     // MARK: - Private Methods
     
     private func findFreePort(startingFrom: Int = 7700) async -> Int? {
@@ -463,8 +645,13 @@ class MeilisearchManager {
             request.httpBody = body
         }
         
+        let startTime = CFAbsoluteTimeGetCurrent()
+        Logger.log("Starting \(method) request to \(path) (body size: \(body?.count ?? 0) bytes)", log: Logger.general)
+        
         do {
             let (data, response) = try await urlSession.data(for: request)
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            Logger.log("Completed \(method) request to \(path) in \(String(format: "%.2f", duration))s", log: Logger.general)
             
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw MeilisearchError.invalidResponse
@@ -472,14 +659,27 @@ class MeilisearchManager {
             
             guard 200...299 ~= httpResponse.statusCode else {
                 let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
+                let duration = CFAbsoluteTimeGetCurrent() - startTime
+                Logger.log("HTTP error \(httpResponse.statusCode) for \(method) request to \(path) after \(String(format: "%.2f", duration))s: \(errorMessage)", log: Logger.general)
                 throw MeilisearchError.httpError(httpResponse.statusCode, errorMessage)
             }
             
             return data
             
         } catch let error as MeilisearchError {
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            Logger.log("Meilisearch error for \(method) request to \(path) after \(String(format: "%.2f", duration))s: \(error.localizedDescription)", log: Logger.general)
             throw error
         } catch {
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+            let errorDescription = (error as NSError).localizedDescription
+            Logger.log("Network error for \(method) request to \(path) after \(String(format: "%.2f", duration))s: \(errorDescription)", log: Logger.general)
+            
+            // Check if this is a timeout error
+            if (error as NSError).code == NSURLErrorTimedOut {
+                Logger.log("Request timed out - server may be overwhelmed. Consider reducing batch size.", log: Logger.general)
+            }
+            
             throw MeilisearchError.networkError(error)
         }
     }
@@ -487,6 +687,68 @@ class MeilisearchManager {
     private func generateMasterKey() -> String {
         let letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         return String((0..<32).map { _ in letters.randomElement()! })
+    }
+}
+
+// MARK: - Search Options
+
+/// Configuration options for search queries
+public struct SearchOptions {
+    /// Maximum number of documents to return (default: 20)
+    public let limit: Int?
+    /// Number of documents to skip (default: 0)
+    public let offset: Int?
+    /// Document fields to include in results
+    public let attributesToRetrieve: [String]?
+    /// Document fields to crop for snippets
+    public let attributesToCrop: [String]?
+    /// Maximum length of cropped fields
+    public let cropLength: Int?
+    /// Document fields to highlight search terms
+    public let attributesToHighlight: [String]?
+    /// Filter expression to apply to search
+    public let filter: String?
+    /// Sort expression for results
+    public let sort: [String]?
+    /// Facet fields to include in results
+    public let facets: [String]?
+    /// HTML tag to wrap highlighted terms (start)
+    public let highlightPreTag: String?
+    /// HTML tag to wrap highlighted terms (end)
+    public let highlightPostTag: String?
+    /// String to indicate cropped text
+    public let cropMarker: String?
+    /// Whether to show match positions
+    public let showMatchesPosition: Bool?
+    
+    public init(
+        limit: Int? = nil,
+        offset: Int? = nil,
+        attributesToRetrieve: [String]? = nil,
+        attributesToCrop: [String]? = nil,
+        cropLength: Int? = nil,
+        attributesToHighlight: [String]? = nil,
+        filter: String? = nil,
+        sort: [String]? = nil,
+        facets: [String]? = nil,
+        highlightPreTag: String? = nil,
+        highlightPostTag: String? = nil,
+        cropMarker: String? = nil,
+        showMatchesPosition: Bool? = nil
+    ) {
+        self.limit = limit
+        self.offset = offset
+        self.attributesToRetrieve = attributesToRetrieve
+        self.attributesToCrop = attributesToCrop
+        self.cropLength = cropLength
+        self.attributesToHighlight = attributesToHighlight
+        self.filter = filter
+        self.sort = sort
+        self.facets = facets
+        self.highlightPreTag = highlightPreTag
+        self.highlightPostTag = highlightPostTag
+        self.cropMarker = cropMarker
+        self.showMatchesPosition = showMatchesPosition
     }
 }
 

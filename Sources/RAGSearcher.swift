@@ -13,6 +13,7 @@ class RAGSearcher: ObservableObject {
     
     private let folderIndexer = FolderIndexer.shared
     private let settingsStore = SettingsStore.shared
+    private let meilisearchManager = MeilisearchManager.shared
     
     private init() {}
     
@@ -23,7 +24,7 @@ class RAGSearcher: ObservableObject {
     func search(query: String) async throws -> String {
         Logger.log("Starting RAG search for query: \(query)", log: Logger.general)
         
-        guard folderIndexer.indexedFolderPath != nil else {
+        guard let indexName = folderIndexer.getCurrentIndexName() else {
             throw SearchError.noIndexAvailable
         }
         
@@ -34,18 +35,17 @@ class RAGSearcher: ObservableObject {
             isSearching = false
         }
         
-        // TODO: Implement actual RAG search logic
-        // This should:
-        // 1. Create embedding for the user query
-        // 2. Search vector database for relevant content chunks
-        // 3. Rank and filter results by relevance
-        // 4. Construct context from top relevant chunks
-        // 5. Send context + query to LLM for final answer generation
-        // 6. Return the generated response
+        // Search Meilisearch for relevant document chunks
+        let relevantChunks = try await findRelevantChunks(for: query, indexName: indexName)
         
-        // Dummy implementation for now
-        let relevantDocuments = try await findRelevantDocuments(for: query)
-        let context = buildContext(from: relevantDocuments)
+        guard !relevantChunks.isEmpty else {
+            throw SearchError.noRelevantContent
+        }
+        
+        // Build context from relevant chunks
+        let context = buildContext(from: relevantChunks)
+        
+        // Generate response using LLM
         let response = try await generateResponse(query: query, context: context)
         
         // Store in search history
@@ -53,7 +53,7 @@ class RAGSearcher: ObservableObject {
             query: query,
             response: response,
             timestamp: Date(),
-            resultCount: relevantDocuments.count
+            resultCount: relevantChunks.count
         )
         searchHistory.append(searchQuery)
         
@@ -62,7 +62,7 @@ class RAGSearcher: ObservableObject {
             searchHistory.removeFirst()
         }
         
-        Logger.log("RAG search completed successfully", log: Logger.general)
+        Logger.log("RAG search completed successfully with \(relevantChunks.count) relevant chunks", log: Logger.general)
         return response
     }
     
@@ -97,35 +97,70 @@ class RAGSearcher: ObservableObject {
     
     // MARK: - Private Methods
     
-    private func findRelevantDocuments(for query: String) async throws -> [DocumentChunk] {
-        // TODO: Implement vector similarity search
-        // This should:
-        // 1. Create query embedding
-        // 2. Search vector database for similar chunks
-        // 3. Return ranked results
+    /// Find relevant document chunks using Meilisearch full-text search
+    /// - Parameters:
+    ///   - query: User query
+    ///   - indexName: Meilisearch index name to search
+    /// - Returns: Array of relevant document chunks
+    private func findRelevantChunks(for query: String, indexName: String) async throws -> [MeilisearchDocumentChunk] {
+        Logger.log("Searching Meilisearch index '\(indexName)' for query: \(query)", log: Logger.general)
         
-        // Dummy implementation
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        // Configure search options
+        let searchOptions = SearchOptions(
+            limit: 10, // Get top 10 most relevant chunks
+            attributesToRetrieve: ["id", "content", "fileName", "filePath", "pageNumber", "chunkNumber", "wordCount"],
+            cropLength: 200,
+            attributesToHighlight: ["content"],
+            highlightPreTag: "<mark>",
+            highlightPostTag: "</mark>"
+        )
         
-        return [
-            DocumentChunk(
-                content: "This is a sample document chunk that would be relevant to the query: \(query)",
-                filePath: "/sample/path/document1.txt",
-                chunkIndex: 0,
-                relevanceScore: 0.85
-            ),
-            DocumentChunk(
-                content: "Another relevant chunk of text that provides context for the user's question.",
-                filePath: "/sample/path/document2.md",
-                chunkIndex: 1,
-                relevanceScore: 0.72
+        // Search Meilisearch
+        do {
+            let searchData = try await meilisearchManager.search(
+                indexUid: indexName,
+                query: query,
+                options: searchOptions
             )
-        ]
+            
+            // Parse search results
+            let searchResults = try parseSearchResults(from: searchData)
+            
+            Logger.log("Found \(searchResults.count) relevant chunks", log: Logger.general)
+            return searchResults
+            
+        } catch {
+            Logger.log("Meilisearch search failed: \(error.localizedDescription)", log: Logger.general)
+            throw SearchError.searchFailed("Meilisearch search failed: \(error.localizedDescription)")
+        }
     }
     
-    private func buildContext(from documents: [DocumentChunk]) -> String {
-        let contextParts = documents.prefix(5).map { chunk in
-            "From \(URL(fileURLWithPath: chunk.filePath).lastPathComponent):\n\(chunk.content)"
+    /// Parse Meilisearch search results JSON into document chunks
+    /// - Parameter data: Raw JSON data from Meilisearch
+    /// - Returns: Array of parsed document chunks
+    private func parseSearchResults(from data: Data) throws -> [MeilisearchDocumentChunk] {
+        struct MeilisearchSearchResponse: Codable {
+            let hits: [MeilisearchDocumentChunk]
+            let query: String
+            let processingTimeMs: Int
+            let limit: Int
+            let offset: Int
+            let estimatedTotalHits: Int
+        }
+        
+        let decoder = JSONDecoder()
+        let response = try decoder.decode(MeilisearchSearchResponse.self, from: data)
+        return response.hits
+    }
+    
+    /// Build context string from relevant document chunks
+    /// - Parameter chunks: Array of relevant document chunks
+    /// - Returns: Formatted context string for LLM
+    private func buildContext(from chunks: [MeilisearchDocumentChunk]) -> String {
+        let contextParts = chunks.prefix(5).map { chunk in
+            let pageInfo = chunk.pageNumber.map { "Page \($0)" } ?? "Document"
+            let source = "\(chunk.fileName) (\(pageInfo))"
+            return "From \(source):\n\(chunk.content)"
         }
         
         return contextParts.joined(separator: "\n\n---\n\n")
@@ -159,17 +194,10 @@ class RAGSearcher: ObservableObject {
 
 // MARK: - Data Models
 
-struct DocumentChunk {
-    let content: String
-    let filePath: String
-    let chunkIndex: Int
-    let relevanceScore: Double
-}
-
 struct SearchResult {
     let query: String
     let answer: String
-    let sources: [DocumentChunk]
+    let sources: [MeilisearchDocumentChunk]
     let timestamp: Date
 }
 
@@ -184,6 +212,7 @@ struct SearchQuery {
 
 enum SearchError: LocalizedError {
     case noIndexAvailable
+    case noRelevantContent
     case llmNotReady
     case searchFailed(String)
     case invalidQuery
@@ -192,6 +221,8 @@ enum SearchError: LocalizedError {
         switch self {
         case .noIndexAvailable:
             return "No folder has been indexed yet. Please select and index a folder first."
+        case .noRelevantContent:
+            return "No relevant content found for your query. Try rephrasing your question."
         case .llmNotReady:
             return "LLM is not ready. Please check your model setup."
         case .searchFailed(let reason):

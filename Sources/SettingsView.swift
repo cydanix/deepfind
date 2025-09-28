@@ -174,7 +174,9 @@ struct SettingsView: View {
                                     
                                     HStack {
                                         Button("Clear Index") {
-                                            folderIndexer.clearIndex()
+                                            Task {
+                                                await folderIndexer.clearIndex()
+                                            }
                                         }
                                         .buttonStyle(.bordered)
                                         .foregroundColor(.red)
@@ -315,7 +317,9 @@ struct SettingsView: View {
     
     private func resetSettings() {
         settings.resetToDefaults()
-        folderIndexer.clearIndex()
+        Task {
+            await folderIndexer.clearIndex()
+        }
         Logger.log("Settings reset to defaults", log: Logger.general)
     }
     
@@ -323,7 +327,9 @@ struct SettingsView: View {
     
     private func deleteAllModels() {
         ModelStorage.shared.deleteAllModels()
-        folderIndexer.clearIndex()
+        Task {
+            await folderIndexer.clearIndex()
+        }
         Logger.log("All models and indexes deleted by user", log: Logger.general)
     }
 }

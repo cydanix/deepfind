@@ -95,8 +95,7 @@ struct DeepFind: App {
                         }
                     } else if response == .alertThirdButtonReturn {
                         // Open the THIRD-PARTY-LICENSES file
-                        if let bundlePath = Bundle.main.resourcePath,
-                           let licensesURL = Bundle.main.url(forResource: "THIRD-PARTY-LICENSES", withExtension: nil) {
+                        if let licensesURL = Bundle.main.url(forResource: "THIRD-PARTY-LICENSES", withExtension: nil) {
                             NSWorkspace.shared.open(licensesURL)
                         } else {
                             // Fallback: try to find it in the app's directory structure
