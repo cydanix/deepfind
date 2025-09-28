@@ -63,4 +63,4 @@ jobs:
 
     # ───────────────────────── unit tests ──────────────────────
     - name: Test (xcodebuild, arm64 only)
-      run: ./get_meilisearch_binary.sh && swift test --parallel --verbose
+      run: ./get_meilisearch_binary.sh && LOCAL_RUN=1 swift test --parallel --verbose
