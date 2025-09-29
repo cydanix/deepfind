@@ -116,14 +116,13 @@ class RAGSearcher: ObservableObject {
         
         // Use dictionary to store unique chunks by ID to avoid duplicates
         var uniqueChunks: [String: DocumentChunk] = [:]
-        var allChunks: [DocumentChunk] = []
-        let chunksLimit = 30
+        let chunksLimit = 100
         
         do {
             // First search with full query (get more results initially)
             let initialSearchOptions = SearchOptions(
-                limit: 15,
-                attributesToRetrieve: ["id", "content", "fileName", "filePath", "pageNumber", "chunkNumber", "wordCount"],
+                limit: 50,
+                attributesToRetrieve: ["id", "content", "filePath", "pageNumber", "chunkNumber"],
                 attributesToHighlight: ["content"],
                 highlightPreTag: "<mark>",
                 highlightPostTag: "</mark>"
@@ -140,7 +139,6 @@ class RAGSearcher: ObservableObject {
             // Add initial results to unique chunks
             for chunk in initialResults {
                 uniqueChunks[chunk.id] = chunk
-                allChunks.append(chunk)
             }
             
             Logger.log("Initial search found \(initialResults.count) chunks", log: Logger.general)
@@ -148,15 +146,15 @@ class RAGSearcher: ObservableObject {
             // If we have keywords, search with phrase combinations
             if !keywords.isEmpty {
                 let phraseSearchOptions = SearchOptions(
-                    limit: 5,
-                    attributesToRetrieve: ["id", "content", "fileName", "filePath", "pageNumber", "chunkNumber", "wordCount"],
+                    limit: 10,
+                    attributesToRetrieve: ["id", "content", "filePath", "pageNumber", "chunkNumber"],
                     attributesToHighlight: ["content"],
                     highlightPreTag: "<mark>",
                     highlightPostTag: "</mark>"
                 )
                 
                 // Search with phrases of different lengths (1 to 3 words)
-                for phraseLength in 1...3 {
+                for phraseLength in 1...5 {
                     guard uniqueChunks.count < chunksLimit else { break }
                     
                     let maxStartIndex = keywords.count - phraseLength
@@ -182,7 +180,6 @@ class RAGSearcher: ObservableObject {
                                 // Only add if not already in unique chunks
                                 if uniqueChunks[chunk.id] == nil {
                                     uniqueChunks[chunk.id] = chunk
-                                    allChunks.append(chunk)
                                 }
                             }
                             
@@ -197,10 +194,10 @@ class RAGSearcher: ObservableObject {
             }
             
             Logger.log("Total unique chunks collected: \(uniqueChunks.count)", log: Logger.general)
-            
+
             // Rerank all collected results
             let reranker = LexicalReranker()
-            let rerankedResults = reranker.rerankLexical(query: query, docs: allChunks)
+            let rerankedResults = reranker.rerankLexical(query: query, docs: Array(uniqueChunks.values))
             
             Logger.log("Found and reranked \(rerankedResults.count) relevant chunks", log: Logger.general)
             return rerankedResults
@@ -219,18 +216,16 @@ class RAGSearcher: ObservableObject {
         struct SearchResultChunk: Codable {
             let id: String
             let content: String
-            let fileName: String
             let filePath: String
             let pageNumber: Int?
             let chunkNumber: Int
-            let wordCount: Int
             // Note: _formatted is ignored as we don't need it
             
             private enum CodingKeys: String, CodingKey {
-                case id, content, fileName, filePath, pageNumber, chunkNumber, wordCount
+                case id, content, filePath, pageNumber, chunkNumber
             }
         }
-        
+
         struct MeilisearchSearchResponse: Codable {
             let hits: [SearchResultChunk]
             let query: String
@@ -263,14 +258,9 @@ class RAGSearcher: ObservableObject {
                 DocumentChunk(
                     id: hit.id,
                     content: hit.content,
-                    fileName: hit.fileName,
                     filePath: hit.filePath,
-                    folderPath: "", // Not returned in search, but required for the struct
-                    pageNumber: hit.pageNumber,
-                    chunkNumber: hit.chunkNumber,
-                    chunkSize: hit.content.count, // Approximate based on content length
-                    wordCount: hit.wordCount,
-                    fileType: "pdf"
+                    pageNumber: hit.pageNumber ?? 0,
+                    chunkNumber: hit.chunkNumber
                 )
             }
             
@@ -280,18 +270,35 @@ class RAGSearcher: ObservableObject {
             throw SearchError.searchFailed("Failed to parse Meilisearch response: \(error.localizedDescription)")
         }
     }
-    
+
+    private func countWords(in text: String) -> Int {
+        let words = text.components(separatedBy: .whitespacesAndNewlines)
+        return words.filter { !$0.isEmpty }.count
+    }
+
+    private func estimateTokenCount(text: String) -> Int {
+        let wordCount = countWords(in: text)
+        return max(Int(1.3 * Double(wordCount)), text.count / 4)
+    }
+
     /// Build context string from relevant document chunks
     /// - Parameter chunks: Array of relevant document chunks
     /// - Returns: Formatted context string for LLM
     private func buildContext(from chunks: [DocumentChunk]) -> String {
-        let contextParts = chunks.prefix(5).map { chunk in
-            let pageInfo = chunk.pageNumber.map { "Page \($0)" } ?? "Document"
-            let source = "\(chunk.fileName) (\(pageInfo))"
-            return "From \(source):\n\(chunk.content)"
+        let separator = "\n\n---\n\n"
+        var contextParts: [String] = []
+
+        var totalTokenCount = 0
+        for chunk in chunks {
+            let source = "FilePath: \(chunk.filePath) (Page: \(chunk.pageNumber)) (ID: \(chunk.id)) (SeqNo: \(chunk.chunkNumber))"
+            totalTokenCount += estimateTokenCount(text: chunk.content)
+            if totalTokenCount > 20000 {
+                break
+            }
+            contextParts.append("From \(source):\n\(chunk.content)")
         }
-        
-        return contextParts.joined(separator: "\n\n---\n\n")
+
+        return contextParts.joined(separator: separator)
     }
     
     private func generateResponse(query: String, context: String) async throws -> String {

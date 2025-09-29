@@ -24,7 +24,152 @@ class FolderIndexer: ObservableObject {
     private let maxRetries = 3 // Maximum retry attempts for failed batches
     
     private init() {}
-    
+
+    private func indexChunks(indexName: String, chunks: [DocumentChunk]) async throws {
+        do {
+            let _ = try await meilisearchManager.indexDocuments(indexUid: indexName, documents: chunks)
+        } catch {
+            Logger.log("Error indexing chunks: \(error.localizedDescription)", log: Logger.general)
+            throw error
+        }
+    }
+
+    private func calculateOverlapStart(document: PdfDocument, currentPageIndex: Int, currentPageOffset: Int, overlapSize: Int) -> (Int, Int) {
+        var remainingOverlap = overlapSize
+        var pageIdx = currentPageIndex
+        var pageOff = currentPageOffset
+        
+        // Walk backwards through pages to find where overlap starts
+        while remainingOverlap > 0 {
+            if pageOff >= remainingOverlap {
+                // Overlap fits within current page
+                pageOff -= remainingOverlap
+                remainingOverlap = 0
+            } else {
+                // Need to go to previous page
+                remainingOverlap -= pageOff
+                pageIdx -= 1
+                
+                if pageIdx < 0 {
+                    // Hit beginning of document
+                    return (0, 0)
+                }
+                
+                // Skip empty pages when going backward
+                while pageIdx >= 0 && document.page(at: pageIdx + 1)?.text.isEmpty ?? true {
+                    pageIdx -= 1
+                }
+                
+                if pageIdx < 0 {
+                    return (0, 0)
+                }
+                
+                pageOff = document.page(at: pageIdx + 1)?.text.count ?? 0
+            }
+        }
+        
+        return (pageIdx, pageOff)
+    }
+
+    /// Index pages using cross-page chunking with overlap
+    /// - Parameters:
+    ///   - document: PDF document to process
+    ///   - indexName: Meilisearch index name
+    /// - Returns: Array of document chunks ready for indexing
+    private func indexPageList(document: PdfDocument, indexName: String) async throws {
+        
+        var chunks: [DocumentChunk] = []
+        var chunkSeqNo = 0
+        var pageIndex = 0
+        var pageOffset = 0
+        var chunk = ""
+        var chunkStartPageIndex = 0
+        var chunkStartPageOffset = 0
+
+        while pageIndex < document.totalPages {
+            let page = document.page(at: pageIndex + 1)
+            
+            // Skip empty pages
+            if page == nil || page!.text.isEmpty {
+                pageIndex += 1
+                pageOffset = 0
+                continue
+            }
+            let pageText = page!.text
+            // Take characters from current page until we fill the chunk or reach end of page
+            let availableInPage = pageText.count - pageOffset
+            let neededForChunk = chunkSize - chunk.count
+            
+            let charsToTake = min(availableInPage, neededForChunk)
+            
+            let startIdx = pageText.index(pageText.startIndex, offsetBy: pageOffset)
+            let endIdx = pageText.index(startIdx, offsetBy: charsToTake)
+            chunk += String(pageText[startIdx..<endIdx])
+            pageOffset += charsToTake
+            
+            // Move to next page if we've consumed all of current page
+            if pageOffset >= pageText.count {
+                pageIndex += 1
+                pageOffset = 0
+            }
+            
+            // If we have a complete chunk, index it
+            if chunk.count >= chunkSize {
+                chunks.append(DocumentChunk(id: UUID().uuidString, content: chunk, filePath: document.fileURL.path, pageNumber: pageIndex + 1, chunkNumber: chunkSeqNo))
+                chunkSeqNo += 1
+                
+                if chunks.count >= 64 {
+                    try await indexChunks(indexName: indexName, chunks: chunks)
+                    chunks = []
+                }
+
+                // Prepare next chunk with overlap
+                if overlapSize > 0 && chunk.count >= overlapSize {
+                    // Keep the last overlapSize characters for the next chunk
+                    let overlapStartIdx = chunk.index(chunk.endIndex, offsetBy: -overlapSize)
+                    let overlap = String(chunk[overlapStartIdx...])
+                    chunk = overlap
+                    
+                    // Calculate where this overlap starts in the page structure
+                    let (startPageIdx, startPageOff) = calculateOverlapStart(
+                        document: document,
+                        currentPageIndex: pageIndex,
+                        currentPageOffset: pageOffset,
+                        overlapSize: overlapSize
+                    )
+                    chunkStartPageIndex = startPageIdx
+                    chunkStartPageOffset = startPageOff
+                } else {
+                    // No overlap or chunk too small for overlap
+                    chunk = ""
+                    chunkStartPageIndex = pageIndex
+                    chunkStartPageOffset = pageOffset
+                }
+            }
+        }
+        
+        // Handle final chunk if there's remaining content
+        if !chunk.isEmpty {
+            let documentChunk = DocumentChunk(id: UUID().uuidString, content: chunk, filePath: document.fileURL.path, pageNumber: chunkStartPageIndex + 1, chunkNumber: chunkSeqNo)
+            chunks.append(documentChunk)
+            try await indexChunks(indexName: indexName, chunks: chunks)
+        }
+        
+    }
+
+    private func indexFile(filePath: String, indexName: String) async throws {
+        do {
+            Logger.log("Processing PDF: \(filePath)", log: Logger.general)
+
+            let document = try await pdfParser.parsePdf(at: URL(fileURLWithPath: filePath))            
+            try await indexPageList(document: document, indexName: indexName)
+
+        } catch {
+            Logger.log("Error indexing file: \(filePath) - \(error.localizedDescription)", log: Logger.general)
+            throw error
+        }
+    }
+
     /// Index the contents of a selected folder
     /// - Parameter folderPath: Path to the folder to index
     /// - Throws: IndexingError if indexing fails
@@ -74,145 +219,22 @@ class FolderIndexer: ObservableObject {
         }
         
         Logger.log("Found \(totalFiles) PDF files to process", log: Logger.general)
-        
-        var processedFiles = 0
-        var totalChunks = 0
-        
+
+        var processedFiles = 0        
         // Process each PDF file
         for (fileIndex, pdfPath) in pdfFiles.enumerated() {
-            do {
-                Logger.log("Processing PDF: \(URL(fileURLWithPath: pdfPath).lastPathComponent)", log: Logger.general)
-                
-                // Parse PDF
-                let document = try await pdfParser.parsePdf(at: URL(fileURLWithPath: pdfPath))
-                
-                // Create chunks from PDF pages
-                let chunks = createChunksFromPdf(document: document, folderPath: folderPath)
-                
-                // Debug logging for chunking analysis
-                let avgChunksPerPage = chunks.count / max(document.totalPages, 1)
-                Logger.log("Created \(chunks.count) chunks from \(document.fileName) (\(document.totalPages) pages) - Avg: \(avgChunksPerPage) chunks/page", log: Logger.general)
-                
-                if chunks.count > 0 {
-                    let sampleChunk = chunks[0]
-                    Logger.log("Sample chunk size: \(sampleChunk.content.count) chars, \(sampleChunk.wordCount) words", log: Logger.general)
-                }
-                
-                // Index chunks in smaller batches with retry logic and better pacing
-                Logger.log("Indexing \(chunks.count) chunks from \(document.fileName) in batches of \(batchSize)", log: Logger.general)
-                
-                for batchStart in stride(from: 0, to: chunks.count, by: batchSize) {
-                    let batchEnd = min(batchStart + batchSize, chunks.count)
-                    let batch = Array(chunks[batchStart..<batchEnd])
-                    let batchNumber = (batchStart / batchSize) + 1
-                    let totalBatches = Int(ceil(Double(chunks.count) / Double(batchSize)))
-                    
-                    // Retry logic for failed batches
-                    var retryCount = 0
-                    var batchSuccess = false
-                    
-                    while retryCount <= maxRetries && !batchSuccess {
-                        let attemptNumber = retryCount + 1
-                        let retryText = retryCount > 0 ? " (attempt \(attemptNumber)/\(maxRetries + 1))" : ""
-                        
-                        Logger.log("Indexing batch \(batchNumber)/\(totalBatches) (\(batch.count) chunks) for \(document.fileName)\(retryText)", log: Logger.general)
-                        
-                        do {
-                            // Log first few document IDs for debugging
-                            let sampleIds = batch.prefix(3).map { $0.id }.joined(separator: ", ")
-                            Logger.log("Attempting to index batch with sample IDs: \(sampleIds)...", log: Logger.general)
-                            
-                            let response = try await meilisearchManager.indexDocuments(indexUid: indexName, documents: batch)
-                            totalChunks += batch.count
-                            batchSuccess = true
-                            Logger.log("Successfully indexed batch \(batchNumber)/\(totalBatches) for \(document.fileName)\(retryText)", log: Logger.general)
-                            
-                            // Log Meilisearch response for debugging
-                            if let responseString = String(data: response, encoding: .utf8) {
-                                Logger.log("Meilisearch response: \(responseString)", log: Logger.general)
-                            }
-                            
-                        } catch let error as MeilisearchError {
-                            retryCount += 1
-                            Logger.log("Failed to index batch \(batchNumber)/\(totalBatches) for \(document.fileName)\(retryText): Meilisearch error - \(error.localizedDescription)", log: Logger.general)
-                            
-                            // Log specific error details for debugging
-                            switch error {
-                            case .httpError(let status, let message):
-                                Logger.log("HTTP \(status): \(message)", log: Logger.general)
-                            case .networkError(let networkError):
-                                Logger.log("Network error: \(networkError.localizedDescription)", log: Logger.general)
-                                // Check if this is a timeout in the network error
-                                if (networkError as NSError).code == NSURLErrorTimedOut {
-                                    Logger.log("Timeout detected in Meilisearch request - server overwhelmed with batch size \(batchSize). Consider reducing batch size further.", log: Logger.general)
-                                }
-                            default:
-                                Logger.log("Other Meilisearch error: \(error)", log: Logger.general)
-                            }
-                        } catch {
-                            retryCount += 1
-                            Logger.log("Failed to index batch \(batchNumber)/\(totalBatches) for \(document.fileName)\(retryText): General error - \(error.localizedDescription)", log: Logger.general)
-                            
-                            // Check for timeout errors and log suggestion
-                            if (error as NSError).code == NSURLErrorTimedOut {
-                                Logger.log("Timeout detected - server overwhelmed with batch size \(batchSize). Consider reducing batch size further in code.", log: Logger.general)
-                            }
-                            
-                        if retryCount <= maxRetries {
-                            // Reduced retry delay for faster recovery
-                            let retryDelay = TimeInterval(Double(retryCount) * 0.5) // 0.5s, 1s, 1.5s
-                            Logger.log("Retrying in \(retryDelay) seconds...", log: Logger.general)
-                            try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
-                        }
-                        }
-                    }
-                    
-                    if !batchSuccess {
-                        Logger.log("Failed to index batch \(batchNumber)/\(totalBatches) after \(maxRetries + 1) attempts. Continuing with next batch.", log: Logger.general)
-                        
-                        // Only delay after failures to avoid overwhelming the server
-                        let failureDelay: UInt64 = 500_000_000 // 0.5 seconds after failure
-                        try await Task.sleep(nanoseconds: failureDelay)
-                    } else {
-                        // Small delay after successful batches to prevent server overload
-                        let successDelay: UInt64 = 50_000_000 // 50ms after success
-                        try await Task.sleep(nanoseconds: successDelay)
-                    }
-                    
-                    // Only pause every 200 batches for health check
-                    if batchNumber % 200 == 0 && batchNumber < totalBatches {
-                        Logger.log("Performing health check after batch \(batchNumber)", log: Logger.general)
-                        
-                        // Check Meilisearch health during long processing
-                        let isHealthy = await meilisearchManager.healthCheck()
-                        if !isHealthy {
-                            Logger.log("Meilisearch health check failed after batch \(batchNumber). Waiting for recovery...", log: Logger.general)
-                            try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds additional wait
-                        }
-                        // No additional delay if health check passes
-                    }
-                }
-                
-                processedFiles += 1
-                Logger.log("Processed \(chunks.count) chunks from \(document.fileName)", log: Logger.general)
-                
-            } catch {
-                Logger.log("Failed to process PDF \(pdfPath): \(error.localizedDescription)", log: Logger.general)
-                // Continue with other files
-            }
-            
+            try await indexFile(filePath: pdfPath, indexName: indexName)
             // Update progress (more granular progress tracking)
-            let baseProgress = Double(fileIndex) / Double(totalFiles)
-            let fileProgress = Double(processedFiles > fileIndex ? 1.0 : 0.0) / Double(totalFiles)
-            indexingProgress = baseProgress + fileProgress
+            indexingProgress = Double(fileIndex) / Double(totalFiles)
+            processedFiles += 1
         }
-        
+
         // Update state
         indexedFolderPath = folderPath
         indexedFileCount = processedFiles
         lastIndexingDate = Date()
         
-        Logger.log("Finished indexing \(processedFiles) PDF files (\(totalChunks) total chunks) from: \(folderPath)", log: Logger.general)
+        Logger.log("Finished indexing \(processedFiles) PDF files from: \(folderPath)", log: Logger.general)
     }
     
     /// Check if a folder is currently indexed
@@ -271,12 +293,9 @@ class FolderIndexer: ObservableObject {
     /// - Parameter folderPath: Full path to the folder
     /// - Returns: Hashed index name
     private func createIndexName(for folderPath: String) -> String {
-        let data = Data(folderPath.utf8)
-        let hash = SHA256.hash(data: data)
-        let hashString = hash.compactMap { String(format: "%02x", $0) }.joined()
-        return "kb_\(String(hashString.prefix(16)))" // Use first 16 chars of hash with prefix
+        return UUID().uuidString
     }
-    
+
     /// Scan folder recursively for PDF files only
     /// - Parameter path: Path to scan
     /// - Returns: Array of PDF file paths
@@ -299,185 +318,7 @@ class FolderIndexer: ObservableObject {
         
         return pdfFiles
     }
-    
-    /// Create chunks from PDF document with overlap
-    /// - Parameters:
-    ///   - document: Parsed PDF document
-    ///   - folderPath: Folder path for metadata
-    /// - Returns: Array of document chunks ready for indexing
-    private func createChunksFromPdf(document: PdfDocument, folderPath: String) -> [DocumentChunk] {
-        var chunks: [DocumentChunk] = []
-        
-        // Process each page
-        for pageNumber in 1...document.totalPages {
-            guard let page = document.page(at: pageNumber) else { continue }
-            
-            // Skip pages with no meaningful content
-            guard page.hasContent else { continue }
-            
-            let pageText = page.cleanedText
-            
-            // Create chunks from page text
-            let pageChunks = createTextChunks(
-                text: pageText,
-                fileName: document.fileName,
-                filePath: document.fileURL.path,
-                folderPath: folderPath,
-                pageNumber: pageNumber
-            )
-            
-            chunks.append(contentsOf: pageChunks)
-        }
-        
-        return chunks
-    }
-    
-    /// Create overlapping text chunks from a text string
-    /// - Parameters:
-    ///   - text: Text to chunk
-    ///   - fileName: Name of source file
-    ///   - filePath: Path to source file
-    ///   - folderPath: Folder path for metadata
-    ///   - pageNumber: Page number for PDF context
-    /// - Returns: Array of text chunks
-    private func createTextChunks(
-        text: String,
-        fileName: String,
-        filePath: String,
-        folderPath: String,
-        pageNumber: Int
-    ) -> [DocumentChunk] {
-        guard !text.isEmpty else { return [] }
-        
-        // Debug logging for excessive chunking
-        if text.count < chunkSize && text.count > 0 {
-            Logger.log("Page \(pageNumber) has only \(text.count) chars (less than chunk size \(chunkSize))", log: Logger.general)
-        }
-        
-        var chunks: [DocumentChunk] = []
-        var startIndex = text.startIndex
-        var chunkNumber = 1
-        let maxChunksPerPage = 20 // Safety limit to prevent runaway chunking
-        
-        while startIndex < text.endIndex && chunks.count < maxChunksPerPage {
-            let remainingText = String(text[startIndex...])
-            let currentChunkSize = min(chunkSize, remainingText.count)
-            let endIndex = text.index(startIndex, offsetBy: currentChunkSize, limitedBy: text.endIndex) ?? text.endIndex
-            
-            let chunkText = String(text[startIndex..<endIndex])
-            let wordCount = PdfParser.countWords(in: chunkText)
-            
-            // Only create chunks with meaningful content (increased threshold)
-            if wordCount > 50 {
-                // Create safe document ID by sanitizing filename and using full UUID
-                let safeFileName = sanitizeFileName(fileName)
-                let chunkId = "\(safeFileName)_p\(pageNumber)_c\(chunkNumber)_\(UUID().uuidString)"
-                
-                let cleanedContent = chunkText.trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                // Validate document before creating
-                guard !cleanedContent.isEmpty && !chunkId.isEmpty else {
-                    Logger.log("Skipping invalid chunk: empty content or ID", log: Logger.general)
-                    chunkNumber += 1
-                    continue
-                }
-                
-                let chunk = DocumentChunk(
-                    id: chunkId,
-                    content: cleanedContent,
-                    fileName: fileName,
-                    filePath: filePath,
-                    folderPath: folderPath,
-                    pageNumber: pageNumber,
-                    chunkNumber: chunkNumber,
-                    chunkSize: chunkText.count,
-                    wordCount: wordCount
-                )
-                
-                // Additional validation before adding to chunks
-                if validateChunk(chunk) {
-                    chunks.append(chunk)
-                } else {
-                    Logger.log("Skipping invalid chunk for \(fileName) page \(pageNumber) chunk \(chunkNumber)", log: Logger.general)
-                }
-            }
-            
-            // Move start index, accounting for overlap
-            let nextStartOffset = max(currentChunkSize - overlapSize, 1)
-            startIndex = text.index(startIndex, offsetBy: nextStartOffset, limitedBy: text.endIndex) ?? text.endIndex
-            chunkNumber += 1
-        }
-        
-        // Debug excessive chunking per page
-        if chunks.count >= maxChunksPerPage {
-            Logger.log("WARNING: Page \(pageNumber) hit safety limit of \(maxChunksPerPage) chunks from \(text.count) chars - chunking stopped early!", log: Logger.general)
-        } else if chunks.count > 10 {
-            Logger.log("WARNING: Page \(pageNumber) created \(chunks.count) chunks from \(text.count) chars - this seems excessive!", log: Logger.general)
-        }
-        
-        return chunks
-    }
-    
-    /// Sanitize filename for safe use in document IDs
-    /// - Parameter fileName: Original filename
-    /// - Returns: Sanitized filename safe for Meilisearch IDs
-    private func sanitizeFileName(_ fileName: String) -> String {
-        // Remove file extension and replace problematic characters
-        let nameWithoutExtension = URL(fileURLWithPath: fileName).deletingPathExtension().lastPathComponent
-        
-        // Replace problematic characters with underscores
-        let sanitized = nameWithoutExtension
-            .replacingOccurrences(of: "[^a-zA-Z0-9_]", with: "_", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "_"))
-        
-        // Ensure it's not empty and not too long
-        let maxLength = 50
-        if sanitized.isEmpty {
-            return "doc"
-        } else if sanitized.count > maxLength {
-            return String(sanitized.prefix(maxLength))
-        } else {
-            return sanitized
-        }
-    }
-    
-    /// Validate a document chunk before indexing
-    /// - Parameter chunk: Document chunk to validate
-    /// - Returns: True if chunk is valid for Meilisearch
-    private func validateChunk(_ chunk: DocumentChunk) -> Bool {
-        // Check required fields are present and non-empty
-        guard !chunk.id.isEmpty,
-              !chunk.content.isEmpty,
-              !chunk.fileName.isEmpty,
-              !chunk.filePath.isEmpty,
-              !chunk.folderPath.isEmpty,
-              chunk.wordCount > 0,
-              chunk.chunkSize > 0,
-              chunk.chunkNumber > 0 else {
-            Logger.log("Chunk validation failed: missing or empty required fields", log: Logger.general)
-            return false
-        }
-        
-        // Check ID length (Meilisearch has limits)
-        if chunk.id.count > 512 {
-            Logger.log("Chunk validation failed: ID too long (\(chunk.id.count) characters)", log: Logger.general)
-            return false
-        }
-        
-        // Check content size (reasonable limits)
-        if chunk.content.count > 50000 { // 50KB limit per chunk
-            Logger.log("Chunk validation failed: content too large (\(chunk.content.count) characters)", log: Logger.general)
-            return false
-        }
-        
-        // Check for potentially problematic content
-        if chunk.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            Logger.log("Chunk validation failed: content is only whitespace", log: Logger.general)
-            return false
-        }
-        
-        return true
-    }
+   
 }
 
 // MARK: - Error Types

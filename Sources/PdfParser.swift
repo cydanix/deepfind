@@ -85,9 +85,9 @@ public class PdfDocument {
     
     /// Get pages that contain meaningful content (lazily evaluated)
     public var contentPages: [DocumentPage] {
-        return allPages.filter { $0.hasContent }
+        return allPages.filter { $0.text.count > 0 }
     }
-    
+
     /// Clear the page cache to free memory
     public func clearPageCache() {
         cacheQueue.async(flags: .barrier) {
@@ -305,7 +305,7 @@ extension PdfDocument {
     /// - Returns: Combined text from specified pages
     public func text(for pageNumbers: [Int]) -> String {
         let texts = pageNumbers.compactMap { pageNumber in
-            page(at: pageNumber)?.cleanedText
+            page(at: pageNumber)?.text
         }
         return texts.joined(separator: "\n\n")
     }
@@ -330,7 +330,7 @@ extension PdfDocument {
     /// - Parameter processor: Closure that processes each content page
     public func forEachContentPage(_ processor: (DocumentPage) throws -> Void) rethrows {
         for pageNumber in 1...totalPages {
-            if let page = page(at: pageNumber), page.hasContent {
+            if let page = page(at: pageNumber) {
                 try processor(page)
             }
         }
