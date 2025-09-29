@@ -97,7 +97,7 @@ class RAGSearcher: ObservableObject {
     
     // MARK: - Private Methods
     
-    /// Find relevant document chunks using Meilisearch full-text search
+    /// Find relevant document chunks using Meilisearch full-text search with multi-search strategy
     /// - Parameters:
     ///   - query: User query
     ///   - indexName: Meilisearch index name to search
@@ -111,35 +111,103 @@ class RAGSearcher: ObservableObject {
             throw SearchError.searchFailed("Meilisearch server is not healthy")
         }
         
-        // Configure search options
-        let searchOptions = SearchOptions(
-            limit: 10, // Get top 10 most relevant chunks
-            attributesToRetrieve: ["id", "content", "fileName", "filePath", "pageNumber", "chunkNumber", "wordCount"],
-            cropLength: 200,
-            attributesToHighlight: ["content"],
-            highlightPreTag: "<mark>",
-            highlightPostTag: "</mark>"
-        )
+        let keywords = KeywordsExtractor().getQueryKeywords(query)
+        Logger.log("Extracted keywords: \(keywords)", log: Logger.general)
         
-        // Search Meilisearch
+        // Use dictionary to store unique chunks by ID to avoid duplicates
+        var uniqueChunks: [String: DocumentChunk] = [:]
+        var allChunks: [DocumentChunk] = []
+        let chunksLimit = 30
+        
         do {
-            let searchData = try await meilisearchManager.search(
-                indexUid: indexName,
-                query: query,
-                options: searchOptions
+            // First search with full query (get more results initially)
+            let initialSearchOptions = SearchOptions(
+                limit: 15,
+                attributesToRetrieve: ["id", "content", "fileName", "filePath", "pageNumber", "chunkNumber", "wordCount"],
+                attributesToHighlight: ["content"],
+                highlightPreTag: "<mark>",
+                highlightPostTag: "</mark>"
             )
             
-            // Parse search results
-            let searchResults = try parseSearchResults(from: searchData)
+            let initialSearchData = try await meilisearchManager.search(
+                indexUid: indexName,
+                query: query,
+                options: initialSearchOptions
+            )
+            
+            let initialResults = try parseSearchResults(from: initialSearchData)
+            
+            // Add initial results to unique chunks
+            for chunk in initialResults {
+                uniqueChunks[chunk.id] = chunk
+                allChunks.append(chunk)
+            }
+            
+            Logger.log("Initial search found \(initialResults.count) chunks", log: Logger.general)
+            
+            // If we have keywords, search with phrase combinations
+            if !keywords.isEmpty {
+                let phraseSearchOptions = SearchOptions(
+                    limit: 5,
+                    attributesToRetrieve: ["id", "content", "fileName", "filePath", "pageNumber", "chunkNumber", "wordCount"],
+                    attributesToHighlight: ["content"],
+                    highlightPreTag: "<mark>",
+                    highlightPostTag: "</mark>"
+                )
+                
+                // Search with phrases of different lengths (1 to 3 words)
+                for phraseLength in 1...3 {
+                    guard uniqueChunks.count < chunksLimit else { break }
+                    
+                    let maxStartIndex = keywords.count - phraseLength
+                    for startIndex in stride(from: maxStartIndex, through: 0, by: -1) {
+                        guard uniqueChunks.count < chunksLimit else { break }
+                        
+                        let phrase = keywords[startIndex..<startIndex + phraseLength].joined(separator: " ")
+                        
+                        do {
+                            let phraseSearchData = try await meilisearchManager.search(
+                                indexUid: indexName,
+                                query: phrase,
+                                options: phraseSearchOptions
+                            )
+                            
+                            let phraseResults = try parseSearchResults(from: phraseSearchData)
+                            
+                            for chunk in phraseResults {
+                                if uniqueChunks.count >= chunksLimit {
+                                    break
+                                }
+                                
+                                // Only add if not already in unique chunks
+                                if uniqueChunks[chunk.id] == nil {
+                                    uniqueChunks[chunk.id] = chunk
+                                    allChunks.append(chunk)
+                                }
+                            }
+                            
+                            Logger.log("Phrase '\(phrase)' found \(phraseResults.count) additional chunks", log: Logger.general)
+                            
+                        } catch {
+                            Logger.log("Phrase search failed for '\(phrase)': \(error.localizedDescription)", log: Logger.general)
+                            // Continue with other phrases even if one fails
+                        }
+                    }
+                }
+            }
+            
+            Logger.log("Total unique chunks collected: \(uniqueChunks.count)", log: Logger.general)
+            
+            // Rerank all collected results
             let reranker = LexicalReranker()
-            let rerankedResults = reranker.rerankLexical(query: query, docs: searchResults)
-
-            Logger.log("Found \(searchResults.count) relevant chunks", log: Logger.general)
+            let rerankedResults = reranker.rerankLexical(query: query, docs: allChunks)
+            
+            Logger.log("Found and reranked \(rerankedResults.count) relevant chunks", log: Logger.general)
             return rerankedResults
             
         } catch {
-            Logger.log("Meilisearch search failed: \(error.localizedDescription)", log: Logger.general)
-            throw SearchError.searchFailed("Meilisearch search failed: \(error.localizedDescription)")
+            Logger.log("Multi-search failed: \(error.localizedDescription)", log: Logger.general)
+            throw SearchError.searchFailed("Multi-search failed: \(error.localizedDescription)")
         }
     }
     
