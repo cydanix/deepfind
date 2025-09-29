@@ -63,12 +63,18 @@ class LocalLLM {
         try await modelContainer.perform { (context: ModelContext) -> Void in
             let lmInput = try await context.processor.prepare(input: userInput)
 
+            // Log input token count
+            let inputTokens = lmInput.text.tokens.size
+            Logger.log("Input tokens: \(inputTokens)", log: Logger.general)
+
             for await generation in try MLXLMCommon.generate(input: lmInput, parameters: generateParameters, context: context) {
                 switch generation {
                 case .chunk(let chunk):
                     await outputActor.append(chunk)
-                default:
-                    break
+                case .info(let info):
+                    // Log completion statistics
+                    Logger.log("Generation completed - Input tokens: \(info.promptTokenCount), Output tokens: \(info.generationTokenCount), Prompt time: \(info.promptTime.formatted(.number.precision(.fractionLength(3))))s, Generation time: \(info.generateTime.formatted(.number.precision(.fractionLength(3))))s, Speed: \(info.tokensPerSecond.formatted(.number.precision(.fractionLength(1)))) tokens/s", log: Logger.general)
+                    await outputActor.setStats(info)
                 }
             }
         }
@@ -82,12 +88,21 @@ class LocalLLM {
 
 private actor OutputActor {
     private var output: String = ""
+    private var stats: GenerateCompletionInfo?
 
     func append(_ chunk: String) {
         output += chunk
     }
 
+    func setStats(_ info: GenerateCompletionInfo) {
+        stats = info
+    }
+
     func getOutput() -> String {
         return output
+    }
+    
+    func getStats() -> GenerateCompletionInfo? {
+        return stats
     }
 }
