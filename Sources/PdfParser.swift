@@ -4,31 +4,6 @@ import Combine
 
 // MARK: - Data Models
 
-/// Represents a single page of parsed PDF content
-public struct PdfPage {
-    /// Page number (1-based)
-    public let pageNumber: Int
-    /// Extracted text content from the page
-    public let text: String
-    /// Cleaned and formatted text suitable for RAG
-    public let cleanedText: String
-    /// Word count of the cleaned text
-    public let wordCount: Int
-    /// Character count of the cleaned text
-    public let characterCount: Int
-    /// Indicates if this page contains meaningful content
-    public let hasContent: Bool
-    
-    public init(pageNumber: Int, text: String) {
-        self.pageNumber = pageNumber
-        self.text = text
-        self.cleanedText = PdfParser.cleanText(text)
-        self.wordCount = PdfParser.countWords(in: cleanedText)
-        self.characterCount = cleanedText.count
-        self.hasContent = wordCount > 5 // Consider pages with more than 5 words as meaningful
-    }
-}
-
 /// Represents a parsed PDF document with lazy page loading for memory efficiency
 public class PdfDocument {
     /// Original file URL
@@ -50,7 +25,7 @@ public class PdfDocument {
     
     // Private properties for lazy loading
     private let pdfDocument: PDFDocument
-    private var cachedPages: [Int: PdfPage] = [:]
+    private var cachedPages: [Int: DocumentPage] = [:]
     private let cacheQueue = DispatchQueue(label: "pdf.page.cache", attributes: .concurrent)
     
     public init(fileURL: URL, pdfDocument: PDFDocument) {
@@ -75,7 +50,7 @@ public class PdfDocument {
     /// Get a specific page, loading it lazily if needed
     /// - Parameter pageNumber: Page number (1-based)
     /// - Returns: The requested page, or nil if not found
-    public func page(at pageNumber: Int) -> PdfPage? {
+    public func page(at pageNumber: Int) -> DocumentPage? {
         guard pageNumber >= 1 && pageNumber <= totalPages else { return nil }
         
         return cacheQueue.sync {
@@ -87,7 +62,7 @@ public class PdfDocument {
             // Load page from PDF
             guard let pdfPage = pdfDocument.page(at: pageNumber - 1) else { return nil }
             let text = pdfPage.string ?? ""
-            let page = PdfPage(pageNumber: pageNumber, text: text)
+            let page = DocumentPage(pageNumber: pageNumber, text: text)
             
             // Cache the page
             cachedPages[pageNumber] = page
@@ -99,17 +74,17 @@ public class PdfDocument {
     /// Get pages within a specific range
     /// - Parameter range: Range of page numbers (1-based)
     /// - Returns: Array of pages within the range
-    public func pages(in range: Range<Int>) -> [PdfPage] {
+    public func pages(in range: Range<Int>) -> [DocumentPage] {
         return range.compactMap { page(at: $0) }
     }
     
     /// Get all pages (use with caution for large documents)
-    public var allPages: [PdfPage] {
+    public var allPages: [DocumentPage] {
         return (1...totalPages).compactMap { page(at: $0) }
     }
     
     /// Get pages that contain meaningful content (lazily evaluated)
-    public var contentPages: [PdfPage] {
+    public var contentPages: [DocumentPage] {
         return allPages.filter { $0.hasContent }
     }
     
@@ -343,7 +318,7 @@ extension PdfDocument {
     
     /// Process pages using a closure, ideal for streaming/lazy processing
     /// - Parameter processor: Closure that processes each page
-    public func forEachPage(_ processor: (PdfPage) throws -> Void) rethrows {
+    public func forEachPage(_ processor: (DocumentPage) throws -> Void) rethrows {
         for pageNumber in 1...totalPages {
             if let page = page(at: pageNumber) {
                 try processor(page)
@@ -353,7 +328,7 @@ extension PdfDocument {
     
     /// Process content pages only (pages with meaningful content)
     /// - Parameter processor: Closure that processes each content page
-    public func forEachContentPage(_ processor: (PdfPage) throws -> Void) rethrows {
+    public func forEachContentPage(_ processor: (DocumentPage) throws -> Void) rethrows {
         for pageNumber in 1...totalPages {
             if let page = page(at: pageNumber), page.hasContent {
                 try processor(page)
@@ -365,7 +340,7 @@ extension PdfDocument {
     /// - Parameters:
     ///   - range: Range of page numbers (1-based)
     ///   - processor: Closure that processes each page
-    public func forEachPage(in range: Range<Int>, processor: (PdfPage) throws -> Void) rethrows {
+    public func forEachPage(in range: Range<Int>, processor: (DocumentPage) throws -> Void) rethrows {
         for pageNumber in range {
             if let page = page(at: pageNumber) {
                 try processor(page)
@@ -383,7 +358,7 @@ public struct PdfPageIterator: IteratorProtocol, Sequence {
         self.document = document
     }
     
-    public mutating func next() -> PdfPage? {
+    public mutating func next() -> DocumentPage? {
         guard let document = document,
               currentPageNumber <= document.totalPages else { return nil }
         

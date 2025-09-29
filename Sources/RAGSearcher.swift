@@ -102,7 +102,7 @@ class RAGSearcher: ObservableObject {
     ///   - query: User query
     ///   - indexName: Meilisearch index name to search
     /// - Returns: Array of relevant document chunks
-    private func findRelevantChunks(for query: String, indexName: String) async throws -> [MeilisearchDocumentChunk] {
+    private func findRelevantChunks(for query: String, indexName: String) async throws -> [DocumentChunk] {
         Logger.log("Searching Meilisearch index '\(indexName)' for query: \(query)", log: Logger.general)
         
         // Check Meilisearch server health first
@@ -131,9 +131,11 @@ class RAGSearcher: ObservableObject {
             
             // Parse search results
             let searchResults = try parseSearchResults(from: searchData)
-            
+            let reranker = LexicalReranker()
+            let rerankedResults = reranker.rerankLexical(query: query, docs: searchResults)
+
             Logger.log("Found \(searchResults.count) relevant chunks", log: Logger.general)
-            return searchResults
+            return rerankedResults
             
         } catch {
             Logger.log("Meilisearch search failed: \(error.localizedDescription)", log: Logger.general)
@@ -144,7 +146,7 @@ class RAGSearcher: ObservableObject {
     /// Parse Meilisearch search results JSON into document chunks
     /// - Parameter data: Raw JSON data from Meilisearch
     /// - Returns: Array of parsed document chunks
-    private func parseSearchResults(from data: Data) throws -> [MeilisearchDocumentChunk] {
+    private func parseSearchResults(from data: Data) throws -> [DocumentChunk] {
         // Separate struct for search results that matches what Meilisearch actually returns
         struct SearchResultChunk: Codable {
             let id: String
@@ -188,9 +190,9 @@ class RAGSearcher: ObservableObject {
             let response = try decoder.decode(MeilisearchSearchResponse.self, from: data)
             Logger.log("Successfully parsed Meilisearch response with \(response.hits.count) hits", log: Logger.general)
             
-            // Convert search results to MeilisearchDocumentChunk format
+            // Convert search results to DocumentChunk format
             let documentChunks = response.hits.map { hit in
-                MeilisearchDocumentChunk(
+                DocumentChunk(
                     id: hit.id,
                     content: hit.content,
                     fileName: hit.fileName,
@@ -214,7 +216,7 @@ class RAGSearcher: ObservableObject {
     /// Build context string from relevant document chunks
     /// - Parameter chunks: Array of relevant document chunks
     /// - Returns: Formatted context string for LLM
-    private func buildContext(from chunks: [MeilisearchDocumentChunk]) -> String {
+    private func buildContext(from chunks: [DocumentChunk]) -> String {
         let contextParts = chunks.prefix(5).map { chunk in
             let pageInfo = chunk.pageNumber.map { "Page \($0)" } ?? "Document"
             let source = "\(chunk.fileName) (\(pageInfo))"
@@ -255,7 +257,7 @@ class RAGSearcher: ObservableObject {
 struct SearchResult {
     let query: String
     let answer: String
-    let sources: [MeilisearchDocumentChunk]
+    let sources: [DocumentChunk]
     let timestamp: Date
 }
 

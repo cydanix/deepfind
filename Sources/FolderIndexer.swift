@@ -305,8 +305,8 @@ class FolderIndexer: ObservableObject {
     ///   - document: Parsed PDF document
     ///   - folderPath: Folder path for metadata
     /// - Returns: Array of document chunks ready for indexing
-    private func createChunksFromPdf(document: PdfDocument, folderPath: String) -> [MeilisearchDocumentChunk] {
-        var chunks: [MeilisearchDocumentChunk] = []
+    private func createChunksFromPdf(document: PdfDocument, folderPath: String) -> [DocumentChunk] {
+        var chunks: [DocumentChunk] = []
         
         // Process each page
         for pageNumber in 1...document.totalPages {
@@ -346,7 +346,7 @@ class FolderIndexer: ObservableObject {
         filePath: String,
         folderPath: String,
         pageNumber: Int
-    ) -> [MeilisearchDocumentChunk] {
+    ) -> [DocumentChunk] {
         guard !text.isEmpty else { return [] }
         
         // Debug logging for excessive chunking
@@ -354,7 +354,7 @@ class FolderIndexer: ObservableObject {
             Logger.log("Page \(pageNumber) has only \(text.count) chars (less than chunk size \(chunkSize))", log: Logger.general)
         }
         
-        var chunks: [MeilisearchDocumentChunk] = []
+        var chunks: [DocumentChunk] = []
         var startIndex = text.startIndex
         var chunkNumber = 1
         let maxChunksPerPage = 20 // Safety limit to prevent runaway chunking
@@ -382,7 +382,7 @@ class FolderIndexer: ObservableObject {
                     continue
                 }
                 
-                let chunk = MeilisearchDocumentChunk(
+                let chunk = DocumentChunk(
                     id: chunkId,
                     content: cleanedContent,
                     fileName: fileName,
@@ -444,7 +444,7 @@ class FolderIndexer: ObservableObject {
     /// Validate a document chunk before indexing
     /// - Parameter chunk: Document chunk to validate
     /// - Returns: True if chunk is valid for Meilisearch
-    private func validateChunk(_ chunk: MeilisearchDocumentChunk) -> Bool {
+    private func validateChunk(_ chunk: DocumentChunk) -> Bool {
         // Check required fields are present and non-empty
         guard !chunk.id.isEmpty,
               !chunk.content.isEmpty,
@@ -477,48 +477,6 @@ class FolderIndexer: ObservableObject {
         }
         
         return true
-    }
-}
-
-// MARK: - Data Models
-
-/// Document chunk for Meilisearch indexing
-struct MeilisearchDocumentChunk: Codable {
-    let id: String
-    let content: String
-    let fileName: String
-    let filePath: String
-    let folderPath: String
-    let pageNumber: Int?
-    let chunkNumber: Int
-    let chunkSize: Int
-    let wordCount: Int
-    let createdAt: String
-    let fileType: String
-    
-    init(
-        id: String,
-        content: String,
-        fileName: String,
-        filePath: String,
-        folderPath: String,
-        pageNumber: Int? = nil,
-        chunkNumber: Int,
-        chunkSize: Int,
-        wordCount: Int,
-        fileType: String = "pdf"
-    ) {
-        self.id = id
-        self.content = content
-        self.fileName = fileName
-        self.filePath = filePath
-        self.folderPath = folderPath
-        self.pageNumber = pageNumber
-        self.chunkNumber = chunkNumber
-        self.chunkSize = chunkSize
-        self.wordCount = wordCount
-        self.createdAt = ISO8601DateFormatter().string(from: Date())
-        self.fileType = fileType
     }
 }
 
