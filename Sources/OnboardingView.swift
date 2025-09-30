@@ -155,9 +155,13 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: 30) {
+            var activeSteps = allSteps.filter { step in
+                !(step.skipCondition?() ?? false)
+            }
+
             // Progress indicator
             HStack {
-                ForEach(0..<allSteps.count, id: \.self) { index in
+                ForEach(0..<activeSteps.count, id: \.self) { index in
                     Circle()
                         .fill(currentStepIndex >= index ? Color.accentColor : Color.white.opacity(0.2))
                         .frame(width: 8, height: 8)
@@ -167,8 +171,8 @@ struct OnboardingView: View {
 
             // Current step content
             VStack(spacing: 20) {
-                if currentStepIndex >= 0 && currentStepIndex < allSteps.count {
-                    let currentStep = allSteps[currentStepIndex]
+                if currentStepIndex >= 0 && currentStepIndex < activeSteps.count {
+                    let currentStep = activeSteps[currentStepIndex]
                     Image(systemName: currentStep.imageName)
                         .font(.system(size: 60))
                         .foregroundColor(.accentColor)
@@ -267,10 +271,10 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                if currentStepIndex >= 0 && currentStepIndex < allSteps.count - 1 {
+                if currentStepIndex >= 0 && currentStepIndex < activeSteps.count - 1 {
                     Button("Next") {
                         withAnimation {
-                            if currentStepIndex >= 0 && currentStepIndex < allSteps.count - 1 {
+                            if currentStepIndex >= 0 && currentStepIndex < activeSteps.count - 1 {
                                 currentStepIndex += 1
                                 stepProgress = 0
                             }
