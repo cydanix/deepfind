@@ -153,7 +153,7 @@ final class LexicalRerankerTests: XCTestCase {
     }
     
     func testRerankLexicalEmptyInput() {
-        let emptyDocs: [MeilisearchDocumentChunk] = []
+        let emptyDocs: [DocumentChunk] = []
         let reranked = lexicalReranker.rerankLexical(query: "test", docs: emptyDocs)
         XCTAssertTrue(reranked.isEmpty, "Empty input should return empty result")
     }
@@ -201,18 +201,13 @@ final class LexicalRerankerTests: XCTestCase {
     
     // MARK: - Helper Methods
     
-    private func createTestDocument(id: String, content: String) -> MeilisearchDocumentChunk {
-        return MeilisearchDocumentChunk(
+    private func createTestDocument(id: String, content: String) -> DocumentChunk {
+        return DocumentChunk(
             id: id,
             content: content,
-            fileName: "test.txt",
-            filePath: "/test/\(id).txt",
-            folderPath: "/test",
-            pageNumber: nil,
+            filePath: "test.txt",
+            pageNumber: 1,
             chunkNumber: 1,
-            chunkSize: content.count,
-            wordCount: content.split(separator: " ").count,
-            fileType: "txt"
         )
     }
 }

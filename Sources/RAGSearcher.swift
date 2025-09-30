@@ -298,7 +298,7 @@ class RAGSearcher: ObservableObject {
         let maxContextSize = settingsStore.contextSize
         var totalTokenCount = 0
         for chunk in chunks {
-            let source = "FilePath: \(chunk.filePath) (Page: \(chunk.pageNumber)) (ID: \(chunk.id)) (SeqNo: \(chunk.chunkNumber))"
+            let source = "FilePath: \(chunk.filePath) (Page: \(chunk.pageNumber))"
             totalTokenCount += estimateTokenCount(text: chunk.content)
             if totalTokenCount > maxContextSize {
                 break
