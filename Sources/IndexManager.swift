@@ -141,6 +141,33 @@ class IndexManager: ObservableObject {
         selectedIndex = nil
     }
     
+    /// Delete all indexes
+    func deleteAllIndexes() async {
+        Logger.log("Deleting all indexes", log: Logger.general)
+        
+        // Delete all indexes from Meilisearch
+        for index in indexes {
+            do {
+                let _ = try await meilisearchManager.deleteIndex(uid: index.id)
+                Logger.log("Deleted Meilisearch index: \(index.id)", log: Logger.general)
+            } catch {
+                Logger.log("Failed to delete Meilisearch index: \(error.localizedDescription)", log: Logger.general)
+            }
+        }
+        
+        // Delete all associated conversations
+        for index in indexes {
+            ChatHistoryManager.shared.deleteConversations(for: index.id)
+        }
+        
+        // Clear all indexes
+        indexes.removeAll()
+        selectedIndex = nil
+        saveIndexes()
+        
+        Logger.log("All indexes deleted", log: Logger.general)
+    }
+    
     // MARK: - Persistence
     
     private func saveIndexes() {

@@ -76,6 +76,11 @@ struct SidebarView: View {
                                         onSelect: {
                                             chatHistoryManager.deselectConversation()
                                             indexManager.selectIndex(index)
+                                        },
+                                        onDelete: {
+                                            Task {
+                                                await indexManager.deleteIndex(index)
+                                            }
                                         }
                                     )
                                 }

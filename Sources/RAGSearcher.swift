@@ -285,7 +285,7 @@ class RAGSearcher: ObservableObject {
 
     private func estimateTokenCount(text: String) -> Int {
         let wordCount = countWords(in: text)
-        return max(Int(1.3 * Double(wordCount)), text.count / 4)
+        return Int(1.1 * max((1.3 * Double(wordCount)), Double(text.count) / 4))
     }
 
     /// Build context string from relevant document chunks
@@ -295,11 +295,12 @@ class RAGSearcher: ObservableObject {
         let separator = "\n\n---\n\n"
         var contextParts: [String] = []
 
+        let maxContextSize = settingsStore.contextSize
         var totalTokenCount = 0
         for chunk in chunks {
             let source = "FilePath: \(chunk.filePath) (Page: \(chunk.pageNumber)) (ID: \(chunk.id)) (SeqNo: \(chunk.chunkNumber))"
             totalTokenCount += estimateTokenCount(text: chunk.content)
-            if totalTokenCount > 20000 {
+            if totalTokenCount > maxContextSize {
                 break
             }
             contextParts.append("From \(source):\n\(chunk.content)")

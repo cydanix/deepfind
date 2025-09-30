@@ -470,8 +470,8 @@ class MeilisearchManager {
     }
     
     // MARK: - Private Methods
-    
-    private func findFreePort(startingFrom: Int = 7700) async -> Int? {
+
+    private func findFreePort(startingFrom: Int = 52000) async -> Int? {
         for port in startingFrom..<(startingFrom + 100) {
             if await isPortFree(port) {
                 return port

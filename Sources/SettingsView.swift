@@ -8,146 +8,128 @@ struct SettingsView: View {
     // Reset confirmation state
     @State private var showingResetConfirmation = false
     
-    // Delete models confirmation state
+    // Delete confirmation states
     @State private var showingDeleteModelsConfirmation = false
+    @State private var showingDeleteIndexesConfirmation = false
+    @State private var showingDeleteConversationsConfirmation = false
     
     var body: some View {
-        TabView {
-            // Status Tab
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Current Index Status")
-                                .font(.headline)
-                                .foregroundColor(.white)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Settings")
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Text("Manage storage and application settings")
+                        .font(.subheadline)
+                        .foregroundColor(.gray)
+                }
+                .padding(.top, 24)
+                
+                // Context Size
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Context Size")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        HStack {
+                            Text("\(settings.contextSize) tokens")
+                                .font(.body)
+                                .foregroundColor(.blue)
+                                .frame(width: 100, alignment: .trailing)
                             
-                            if let _ = folderIndexer.indexedFolderPath {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(folderIndexer.getIndexingSummary())
-                                        .font(.body)
-                                        .foregroundColor(.white)
-                                    
-                                    HStack {
-                                        Button("Clear Index") {
-                                            Task {
-                                                await folderIndexer.clearIndex()
-                                            }
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .foregroundColor(.red)
-                                        
-                                        Spacer()
-                                    }
-                                }
-                            } else {
-                                Text("No folder currently indexed")
-                                    .font(.body)
-                                    .foregroundColor(.gray)
-                            }
+                            Slider(value: Binding(
+                                get: { Double(settings.contextSize) },
+                                set: { settings.contextSize = Int($0) }
+                            ), in: 4000...25000, step: 1000)
                             
-                            Text("View and manage your current document index.")
+                            Text("4K - 25K")
                                 .font(.caption)
                                 .foregroundColor(.gray)
                         }
-                        .padding()
+                        
+                        Text("The larger the context size, the more document content will be used to generate answers. This results in better, more comprehensive responses but takes longer to process.")
+                            .font(.caption)
+                            .foregroundColor(.gray)
                     }
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
+                    .padding()
                 }
-                .padding()
-            }
-            .background(Color.black)
-            .tabItem {
-                Label("Status", systemImage: "info.circle")
-            }
-            
-            // Model Management Tab
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Supported File Types")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                            
-                            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 8) {
-                                ForEach(settings.getSupportedFileTypes(), id: \.self) { fileType in
-                                    Text(".\(fileType)")
-                                        .font(.caption)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(Color.blue.opacity(0.3))
-                                        .cornerRadius(4)
-                                }
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(8)
+                
+                // Storage Management
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Storage Management")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        Text("Delete downloaded AI models, indexes, or conversations from your system. This will free up disk space but you may need to re-download or re-create items when needed.")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                        
+                        HStack(spacing: 12) {
+                            Button("Delete Models") {
+                                showingDeleteModelsConfirmation = true
                             }
+                            .buttonStyle(.bordered)
+                            .foregroundColor(.red)
                             
-                            Text("These file types can be indexed and searched. More file types may be added in future updates.")
-                                .font(.caption)
-                                .foregroundColor(.gray)
-                        }
-                        .padding()
-                    }
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
-                    
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Storage Management")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                            
-                            Text("Delete all downloaded AI models and indexes from your system. This will free up disk space but you'll need to re-download models and re-index folders when needed.")
-                                .font(.body)
-                                .foregroundColor(.gray)
-                            
-                            HStack {
-                                Button("Delete All Models") {
-                                    showingDeleteModelsConfirmation = true
-                                }
-                                .buttonStyle(.bordered)
-                                .foregroundColor(.red)
-                                
-                                Spacer()
+                            Button("Delete Indexes") {
+                                showingDeleteIndexesConfirmation = true
                             }
-                        }
-                        .padding()
-                    }
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
-                    
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Reset to Defaults")
-                                .font(.headline)
-                                .foregroundColor(.white)
+                            .buttonStyle(.bordered)
+                            .foregroundColor(.red)
                             
-                            Text("This will reset all settings to their default values, including search parameters and LLM settings. This action cannot be undone.")
-                                .font(.body)
-                                .foregroundColor(.gray)
-                            
-                            HStack {
-                                Button("Reset All Settings") {
-                                    showingResetConfirmation = true
-                                }
-                                .buttonStyle(.bordered)
-                                .foregroundColor(.red)
-                                
-                                Spacer()
+                            Button("Delete Conversations") {
+                                showingDeleteConversationsConfirmation = true
                             }
+                            .buttonStyle(.bordered)
+                            .foregroundColor(.red)
+                            
+                            Spacer()
                         }
-                        .padding()
                     }
-                    .background(Color.gray.opacity(0.2))
-                    .cornerRadius(8)
+                    .padding()
                 }
-                .padding()
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(8)
+                
+                // Reset to Defaults
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Reset to Defaults")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        
+                        Text("This will reset all settings to their default values, including search parameters and LLM settings. This action cannot be undone.")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                        
+                        HStack {
+                            Button("Reset All Settings") {
+                                showingResetConfirmation = true
+                            }
+                            .buttonStyle(.bordered)
+                            .foregroundColor(.red)
+                            
+                            Spacer()
+                        }
+                    }
+                    .padding()
+                }
+                .background(Color.gray.opacity(0.2))
+                .cornerRadius(8)
             }
-            .background(Color.black)
-            .tabItem {
-                Label("Management", systemImage: "gear")
-            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 32)
         }
+        .frame(minWidth: 600, minHeight: 400)
+        .background(Color.black)
         .alert("Reset Settings", isPresented: $showingResetConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Reset", role: .destructive) {
@@ -158,14 +140,28 @@ struct SettingsView: View {
         }
         .alert("Delete All Models", isPresented: $showingDeleteModelsConfirmation) {
             Button("Cancel", role: .cancel) { }
-            Button("Delete All", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 deleteAllModels()
             }
         } message: {
-            Text("Are you sure you want to delete all downloaded AI models and indexes? This will free up disk space but you'll need to re-download models and re-index folders when they're needed again. This action cannot be undone.")
+            Text("Are you sure you want to delete all downloaded AI models? This will free up disk space but you'll need to re-download models when they're needed again. This action cannot be undone.")
         }
-        .frame(minWidth: 600, minHeight: 500)
-        .background(Color.black)
+        .alert("Delete All Indexes", isPresented: $showingDeleteIndexesConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteAllIndexes()
+            }
+        } message: {
+            Text("Are you sure you want to delete all indexes? This will remove all indexed folder data and you'll need to re-index folders when needed again. This action cannot be undone.")
+        }
+        .alert("Delete All Conversations", isPresented: $showingDeleteConversationsConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteAllConversations()
+            }
+        } message: {
+            Text("Are you sure you want to delete all chat conversations? All conversation history will be permanently removed. This action cannot be undone.")
+        }
         .preferredColorScheme(.dark)
     }
     
@@ -179,13 +175,24 @@ struct SettingsView: View {
         Logger.log("Settings reset to defaults", log: Logger.general)
     }
     
-    // MARK: - Model Management
+    // MARK: - Storage Management
     
     private func deleteAllModels() {
         ModelStorage.shared.deleteAllModels()
+        Logger.log("All models deleted by user", log: Logger.general)
+    }
+    
+    private func deleteAllIndexes() {
         Task {
-            await folderIndexer.clearIndex()
+            await IndexManager.shared.deleteAllIndexes()
         }
-        Logger.log("All models and indexes deleted by user", log: Logger.general)
+        Logger.log("All indexes deleted by user", log: Logger.general)
+    }
+    
+    private func deleteAllConversations() {
+        Task {
+            await ChatHistoryManager.shared.deleteAllConversations()
+        }
+        Logger.log("All conversations deleted by user", log: Logger.general)
     }
 }

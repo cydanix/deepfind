@@ -108,6 +108,14 @@ class ChatHistoryManager: ObservableObject {
         }
     }
     
+    /// Delete all conversations
+    func deleteAllConversations() {
+        conversations.removeAll()
+        selectedConversation = nil
+        saveConversations()
+        Logger.log("Deleted all conversations", log: Logger.general)
+    }
+    
     // MARK: - Persistence
     
     private func saveConversations() {
