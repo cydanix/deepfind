@@ -26,7 +26,7 @@ let TextLLMModelNames = [
 
 let DeepFindAppDir = "/Applications/DeepFind.app"
 
-let DeepFindSite = "https://deepfind.com"
+let DeepFindSite = "https://cydanix.com/deepfind"
 let DeepFindCompanyName = "Cydanix LLC"
 
 let DeepFindAppName = "DeepFind"
