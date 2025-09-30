@@ -525,8 +525,16 @@ class MeilisearchManager {
             "--no-analytics"
         ]
         
+        // Set the current directory to a writable location
+        // This prevents Meilisearch from trying to write to the app bundle
+        process.currentDirectoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        
+        // Inherit environment from parent process
+        process.environment = ProcessInfo.processInfo.environment
+        
         Logger.log("Starting Meilisearch with arguments: \(process.arguments!.joined(separator: " "))", log: Logger.general)
         Logger.log("Using master key: \(masterKey)", log: Logger.general)
+        Logger.log("Current directory: \(process.currentDirectoryURL?.path ?? "none")", log: Logger.general)
         
         // Redirect output to log files to prevent pipe hanging
         let logDir = "/tmp" // Use /tmp instead of /var/log for better permissions

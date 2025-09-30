@@ -84,7 +84,8 @@ struct OnboardingView: View {
             title: "Download LLM Model",
             description: """
             Required for:
-            • Text-enhancing
+            • AI-powered question answering about your documents
+            • Natural language chat with your document content
 
             Click "Download" to download the model.
             """,
@@ -123,12 +124,13 @@ struct OnboardingView: View {
             description: """
             Quick Start:
             • Launch the app from the Applications folder
-            • Click "Select Folder" to choose a folder containing your documents
-            • Wait for the indexing process to complete
-            • Type your question in the search box
-            • Get AI-powered answers based on your document content
+            • Click "New Index" in the sidebar
+            • Select a folder containing your documents
+            • Wait for indexing to complete (progress shown in sidebar)
+            • Click on your index to start a chat
+            • Ask questions about your documents and get AI-powered answers
 
-            Access settings from the menu bar icon.
+            Access settings from DeepFind → Settings in the menu bar.
             """,
             imageName: "checkmark.circle.fill",
             buttonText: "Get Started",

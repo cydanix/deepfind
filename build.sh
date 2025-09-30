@@ -65,6 +65,7 @@ if [ -f "External/meilisearch" ]; then
     xcrun codesign --force \
                    --options runtime \
                    --timestamp \
+                   --entitlements Meilisearch.entitlements \
                    --sign "$SIGNING_IDENTITY" \
                    --verbose=4 \
                    "$BUNDLE_PATH/Contents/Resources/meilisearch"
