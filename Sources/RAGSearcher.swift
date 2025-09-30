@@ -18,13 +18,20 @@ class RAGSearcher: ObservableObject {
     private init() {}
     
     /// Perform a RAG search query
-    /// - Parameter query: The user's question/query
+    /// - Parameters:
+    ///   - query: The user's question/query
+    ///   - indexId: The index ID to search (optional, defaults to current folder indexer's index)
     /// - Returns: Generated response based on indexed content
     /// - Throws: SearchError if search fails
-    func search(query: String) async throws -> String {
+    func search(query: String, indexId: String? = nil) async throws -> String {
         Logger.log("Starting RAG search for query: \(query)", log: Logger.general)
         
-        guard let indexName = folderIndexer.getCurrentIndexName() else {
+        let indexName: String
+        if let providedIndexId = indexId {
+            indexName = providedIndexId
+        } else if let currentIndexName = folderIndexer.getCurrentIndexName() {
+            indexName = currentIndexName
+        } else {
             throw SearchError.noIndexAvailable
         }
         

@@ -3,62 +3,47 @@ import AppKit
 
 struct ChatAreaView: View {
     let messages: [ChatMessage]
-    @ObservedObject var folderIndexer: FolderIndexer
+    let showEmptyState: Bool
     
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 16) {
-                    if messages.isEmpty {
+                    if messages.isEmpty && showEmptyState {
                         VStack(spacing: 20) {
-                            if folderIndexer.indexedFolderPath != nil {
-                                VStack(spacing: 16) {
-                                    Image(systemName: "bubble.left.and.bubble.right")
-                                        .font(.system(size: 48))
-                                        .foregroundColor(.blue.opacity(0.6))
-                                    
-                                    Text("Ready to Chat!")
-                                        .font(.title2)
-                                        .foregroundColor(.white)
-                                    
-                                    Text("Your knowledge base is ready. Ask any question about your documents below.")
-                                        .font(.subheadline)
-                                        .foregroundColor(.gray)
-                                        .multilineTextAlignment(.center)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 60)
+                            VStack(spacing: 16) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .font(.system(size: 48))
+                                    .foregroundColor(.blue.opacity(0.6))
                                 
-                                // Sample questions
-                                VStack(spacing: 8) {
-                                    Text("Try asking:")
-                                        .font(.caption)
-                                        .foregroundColor(.gray)
-                                    
-                                    VStack(spacing: 6) {
-                                        Text("• \"Summarize the main points\"")
-                                        Text("• \"What are the key findings?\"")
-                                        Text("• \"Explain the methodology\"")
-                                    }
+                                Text("Ready to Chat!")
+                                    .font(.title2)
+                                    .foregroundColor(.white)
+                                
+                                Text("Your knowledge base is ready. Ask any question about your documents below.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 60)
+                            
+                            // Sample questions
+                            VStack(spacing: 8) {
+                                Text("Try asking:")
                                     .font(.caption)
-                                    .foregroundColor(.gray.opacity(0.8))
+                                    .foregroundColor(.gray)
+                                
+                                VStack(spacing: 6) {
+                                    Text("• \"Summarize the main points\"")
+                                    Text("• \"What are the key findings?\"")
+                                    Text("• \"Explain the methodology\"")
                                 }
-                            } else {
-                                VStack(spacing: 16) {
-                                    Image(systemName: "arrow.up")
-                                        .font(.system(size: 32))
-                                        .foregroundColor(.blue.opacity(0.6))
-                                    
-                                    Text("Set up your knowledge base above to start chatting")
-                                        .font(.title3)
-                                        .foregroundColor(.gray)
-                                        .multilineTextAlignment(.center)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 100)
+                                .font(.caption)
+                                .foregroundColor(.gray.opacity(0.8))
                             }
                         }
-                    } else {
+                    } else if !messages.isEmpty {
                         ForEach(messages) { message in
                             ChatMessageView(message: message)
                                 .id(message.id)

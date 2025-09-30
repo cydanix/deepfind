@@ -171,9 +171,12 @@ class FolderIndexer: ObservableObject {
     }
 
     /// Index the contents of a selected folder
-    /// - Parameter folderPath: Path to the folder to index
+    /// - Parameters:
+    ///   - folderPath: Path to the folder to index
+    ///   - indexId: Optional custom index ID (defaults to UUID)
+    ///   - onProgress: Optional progress callback
     /// - Throws: IndexingError if indexing fails
-    func indexFolder(at folderPath: String) async throws {
+    func indexFolder(at folderPath: String, indexId: String? = nil, onProgress: ((Double) async -> Void)? = nil) async throws {
         Logger.log("Starting to index folder: \(folderPath)", log: Logger.general)
         
         isIndexing = true
@@ -188,8 +191,8 @@ class FolderIndexer: ObservableObject {
             throw IndexingError.meilisearchError("Failed to start Meilisearch server")
         }
         
-        // Create index name from folder path hash
-        let indexName = createIndexName(for: folderPath)
+        // Use provided index ID or create new one
+        let indexName = indexId ?? createIndexName(for: folderPath)
         currentIndexName = indexName
         
         Logger.log("Using index name: \(indexName)", log: Logger.general)
@@ -225,7 +228,9 @@ class FolderIndexer: ObservableObject {
         for (fileIndex, pdfPath) in pdfFiles.enumerated() {
             try await indexFile(filePath: pdfPath, indexName: indexName)
             // Update progress (more granular progress tracking)
-            indexingProgress = Double(fileIndex) / Double(totalFiles)
+            let progress = Double(fileIndex + 1) / Double(totalFiles)
+            indexingProgress = progress
+            await onProgress?(progress)
             processedFiles += 1
         }
 
