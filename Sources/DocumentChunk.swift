@@ -15,7 +15,7 @@ public struct DocumentChunk: Codable {
         content: String,
         filePath: String,
         pageNumber: Int,
-        chunkNumber: Int,
+        chunkNumber: Int
     ) {
         self.id = id
         self.content = content
